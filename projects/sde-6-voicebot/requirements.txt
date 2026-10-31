@@ -1,0 +1,5 @@
+# SDE 6 Voicebot - Workstream W3 Context and Reasoning
+# Note: Designed to run entirely using Python 3 standard library with zero external dependencies.
+# Development optional dependencies:
+# pytest>=7.0.0
+# pydantic>=2.0.0
