@@ -94,9 +94,13 @@ export class MockApiClient implements ApiClient {
     };
   }
 
-  async getSession(_request: SessionRetrievalRequest): Promise<SessionRetrievalResponse> {
+  async getSession(request: SessionRetrievalRequest): Promise<SessionRetrievalResponse> {
     if (this.scenario === 'session-not-found') {
-      throw createMockHttpError(404, 'SESSION_NOT_FOUND', 'Session not found.');
+      throw createMockHttpError(
+        404,
+        'SESSION_NOT_FOUND',
+        `Session '${request.session_id}' not found.`,
+      );
     }
     if (this.scenario === 'server-error') {
       throw createMockHttpError(500, 'INTERNAL_SERVER_ERROR', 'The mock server failed.');

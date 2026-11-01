@@ -54,7 +54,7 @@ describe('API clients', () => {
       apiError: {
         error: {
           code: 'SESSION_NOT_FOUND',
-          message: 'Session not found.',
+          message: "Session 'missing' not found.",
         },
       },
     });
