@@ -1,0 +1,7 @@
+# Root gitignore
+push_to_team_repo.bat
+push_to_team_repo.ps1
+.env
+*.log
+__pycache__/
+*.pyc

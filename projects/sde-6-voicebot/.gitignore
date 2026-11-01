@@ -26,3 +26,7 @@ Thumbs.db
 build/
 dist/
 *.egg-info/
+
+# Local push scripts
+push_to_team_repo.bat
+push_to_team_repo.ps1
