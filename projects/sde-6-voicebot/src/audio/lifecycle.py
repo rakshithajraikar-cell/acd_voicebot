@@ -124,3 +124,4 @@ class AudioLifecycleController:
         """Reset state machine back to CREATED (for reuse in mock runs)."""
         with self._lock:
             self._state = LifecycleState.CREATED
+

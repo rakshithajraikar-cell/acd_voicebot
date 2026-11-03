@@ -200,3 +200,4 @@ class BoundedAudioBuffer:
                 late_chunks_detected=self._late_chunks_detected,
                 queued_duration_ms=round(self.queued_duration_ms, 2),
             )
+

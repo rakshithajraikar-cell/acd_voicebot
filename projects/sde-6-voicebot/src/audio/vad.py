@@ -152,3 +152,4 @@ class EnergyVAD(VoiceActivityDetector):
             speech_duration_ms=round(self._total_speech_duration_ms, 2),
             state=state,
         )
+

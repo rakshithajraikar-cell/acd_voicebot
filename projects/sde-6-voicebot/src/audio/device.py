@@ -249,3 +249,4 @@ class MockAudioDeviceAdapter(AudioDeviceAdapter):
                     "supported_channels": device.supported_channels,
                 },
             )
+
