@@ -4,19 +4,23 @@ __pycache__/
 *$py.class
 *.so
 
-# Environments & secrets
+# Environments & virtualenvs
 .env
 .env.*
 *.secret
 *.pem
 *.key
+.venv
+env/
+venv/
+ENV/
 
-# Testing & coverage
+# Testing and coverage
 .pytest_cache/
 .coverage
 htmlcov/
 
-# Editor / OS
+# Editor / OS / IDE files
 .vscode/
 .idea/
 .DS_Store
