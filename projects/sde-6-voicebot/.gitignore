@@ -4,8 +4,12 @@ __pycache__/
 *$py.class
 *.so
 
-# Environments
+# Environments & virtualenvs
 .env
+.env.*
+*.secret
+*.pem
+*.key
 .venv
 env/
 venv/
@@ -16,6 +20,17 @@ ENV/
 .coverage
 htmlcov/
 
-# IDE files
+# Editor / OS / IDE files
 .vscode/
 .idea/
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Local push scripts
+push_to_team_repo.bat
+push_to_team_repo.ps1
