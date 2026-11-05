@@ -2,22 +2,29 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ArrowUpRight,
   CheckCircle2,
+  Circle,
+  CircleAlert,
   Clock3,
   Headphones,
   LoaderCircle,
   Plus,
   RefreshCw,
   Sparkles,
+  WifiOff,
 } from 'lucide-react';
-import type { ApiClient } from './api/client';
+import { ApiClientError, type ApiClient } from './api/client';
 import { apiClient, apiClientConfiguration } from './api/configuredClient';
 import { apiRouteOverview } from './api/routeOverview';
 import { AppShell } from './components/AppShell';
+import { ContextSourcesPanel } from './components/ContextSourcesPanel';
 import { MicrophonePanel } from './components/MicrophonePanel';
 import { SessionControls } from './components/SessionControls';
+import { ToolApprovalDemo } from './components/ToolApprovalDemo';
 import { TranscriptTimeline } from './components/TranscriptTimeline';
 import { useMockSession } from './hooks/useMockSession';
 import type { Session } from './models/session';
+import { upsertTranscriptEvent } from './stores/transcriptStore';
+import { startMockTranscription } from './services/mockTranscriptionService';
 import { getDemoWorkspace } from './services/demoWorkspaceService';
 import type { HealthCheckResponse, SessionRetrievalResponse } from './api/contracts';
 import type { TranscriptEvent } from './types';
@@ -25,12 +32,17 @@ import type { TranscriptEvent } from './types';
 type ApiLoadState =
   | Readonly<{ status: 'idle' }>
   | Readonly<{ status: 'loading' }>
+  | Readonly<{ status: 'offline' }>
   | Readonly<{
       status: 'success';
       session: SessionRetrievalResponse;
       health: HealthCheckResponse;
     }>
   | Readonly<{ status: 'error'; message: string }>;
+type ApiResponseData = Readonly<{
+  session: SessionRetrievalResponse;
+  health: HealthCheckResponse;
+}>;
 
 function formatApiResponse(response: unknown): string {
   return JSON.stringify(response, null, 2) ?? String(response);
@@ -42,30 +54,64 @@ type AppProps = Readonly<{
 
 function App({ client = apiClient }: AppProps) {
   const newSessionButtonRef = useRef<HTMLButtonElement>(null);
+  const apiFeedbackRef = useRef<HTMLDivElement>(null);
+  const apiRetryButtonRef = useRef<HTMLButtonElement>(null);
   const focusNewSession = useCallback(() => newSessionButtonRef.current?.focus(), []);
   const {
     session,
+    networkStatus,
+    setNetworkStatus,
     requestState,
     loadingAction,
+    failedAction,
     error: sessionError,
+    captureError,
+    captureActionPending,
     isLoading: isSessionLoading,
     createSession,
     startSession,
     endSession,
+    pauseCapture,
+    resumeCapture,
     renameSession,
+    setContextSourceEnabled,
+    retryFailedAction,
   } = useMockSession();
   const createTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const stopTranscriptionRef = useRef<(() => void) | null>(null);
   const [events, setEvents] = useState<TranscriptEvent[]>([]);
   const [apiState, setApiState] = useState<ApiLoadState>({ status: 'idle' });
+  const previousApiStatus = useRef<ApiLoadState['status']>(apiState.status);
+  const [lastApiResponse, setLastApiResponse] = useState<ApiResponseData | null>(null);
+  const visibleApiState: ApiLoadState =
+    networkStatus === 'offline'
+      ? { status: 'offline' }
+      : apiState.status === 'offline'
+        ? { status: 'idle' }
+        : apiState;
+  const apiResponse = visibleApiState.status === 'success' ? visibleApiState : lastApiResponse;
+
+  useEffect(() => {
+    if (visibleApiState.status === 'error' && previousApiStatus.current !== 'error') {
+      if (apiRetryButtonRef.current) {
+        apiRetryButtonRef.current.focus();
+      } else {
+        apiFeedbackRef.current?.focus();
+      }
+    }
+    previousApiStatus.current = visibleApiState.status;
+  }, [visibleApiState.status]);
 
   useEffect(() => {
     if (loadingAction || !createTriggerRef.current) {
       return;
     }
 
-    createTriggerRef.current.focus();
+    if (requestState === 'success') {
+      createTriggerRef.current.focus();
+    }
     createTriggerRef.current = null;
-  }, [loadingAction]);
+  }, [loadingAction, requestState]);
 
   async function loadWorkspace(
     options: Readonly<{
@@ -78,8 +124,6 @@ function App({ client = apiClient }: AppProps) {
       return;
     }
 
-    setApiState({ status: 'loading' });
-    setEvents([]);
     const sessionId = session?.id;
     if (!sessionId) {
       setApiState({
@@ -88,48 +132,76 @@ function App({ client = apiClient }: AppProps) {
       });
       return;
     }
+    if (networkStatus === 'offline' && apiClientConfiguration.mode === 'http') {
+      setApiState({ status: 'offline' });
+      return;
+    }
 
+    setApiState({ status: 'loading' });
     try {
       const sessionResponse = await client.getSession({ session_id: sessionId });
       const healthResponse = await client.healthCheck();
       const result = await getDemoWorkspace();
       if (!result.ok) {
-        setApiState({ status: 'error', message: result.error.message });
+        setApiState({ status: 'error', message: `Couldn’t load session. ${result.error.message}` });
         return;
       }
 
       if (options.renameCurrentSession ?? true) {
         const renameResult = renameSession(result.data.sessionName);
         if (!renameResult.ok) {
-          setApiState({ status: 'error', message: renameResult.error.message });
+          setApiState({
+            status: 'error',
+            message: `Couldn’t update session. ${renameResult.error.message}`,
+          });
           return;
         }
       }
 
-      setEvents(result.data.transcript);
+      setEvents((currentEvents) =>
+        result.data.transcript.reduce(upsertTranscriptEvent, currentEvents),
+      );
+      setLastApiResponse({ session: sessionResponse, health: healthResponse });
       setApiState({
         status: 'success',
         session: sessionResponse,
         health: healthResponse,
       });
     } catch (error) {
-      setApiState({
-        status: 'error',
-        message:
-          error instanceof Error && error.message.trim()
-            ? error.message
-            : 'An unexpected error occurred while loading the session.',
-      });
+      if (error instanceof ApiClientError && error.kind === 'network') {
+        setNetworkStatus('offline');
+        setApiState({ status: 'offline' });
+      } else {
+        setApiState({
+          status: 'error',
+          message:
+            error instanceof Error && error.message.trim()
+              ? `Couldn’t load session. ${error.message}`
+              : 'Couldn’t load session. Please try again.',
+        });
+      }
     }
   }
 
   async function handleStartSession() {
     const result = await startSession();
     if (result?.ok) {
+      stopTranscriptionRef.current?.();
+      stopTranscriptionRef.current = startMockTranscription((event) => {
+        setEvents((currentEvents) => upsertTranscriptEvent(currentEvents, event));
+      });
       await loadWorkspace({
         renameCurrentSession: false,
         sessionStatus: result.data.status,
       });
+    }
+  }
+
+  async function handleEndSession() {
+    const result = await endSession();
+    if (result?.ok) {
+      stopTranscriptionRef.current?.();
+      stopTranscriptionRef.current = null;
     }
   }
 
@@ -141,8 +213,25 @@ function App({ client = apiClient }: AppProps) {
     if (!result?.ok) {
       return;
     }
+    stopTranscriptionRef.current?.();
+    stopTranscriptionRef.current = null;
     setEvents([]);
+    setLastApiResponse(null);
     setApiState({ status: 'idle' });
+  }
+
+  useEffect(
+    () => () => {
+      stopTranscriptionRef.current?.();
+    },
+    [],
+  );
+
+  function handleRetrySessionRequest() {
+    if (failedAction === 'create') {
+      createTriggerRef.current = newSessionButtonRef.current;
+    }
+    retryFailedAction();
   }
 
   return (
@@ -150,9 +239,10 @@ function App({ client = apiClient }: AppProps) {
       onNewSession={handleCreateSession}
       isSessionLoading={isSessionLoading}
       isCreatingSession={loadingAction === 'create'}
+      networkStatus={networkStatus}
     >
       <main className="main-content" id="main-content" tabIndex={-1}>
-        <div className="page-heading">
+        <div className="page-heading" aria-busy={loadingAction === 'create'}>
           <div>
             <div className="page-kicker">
               <span className="kicker-line" /> YOUR THINKING PARTNER
@@ -171,10 +261,15 @@ function App({ client = apiClient }: AppProps) {
             type="button"
             aria-label="New session"
             aria-busy={loadingAction === 'create'}
+            aria-live="polite"
             onClick={handleCreateSession}
             disabled={isSessionLoading}
           >
-            <Plus size={16} aria-hidden="true" />
+            {loadingAction === 'create' ? (
+              <LoaderCircle className="loading-spinner" size={16} aria-hidden="true" />
+            ) : (
+              <Plus size={16} aria-hidden="true" />
+            )}
             {loadingAction === 'create' ? 'Creating…' : 'New Session'}
           </button>
         </div>
@@ -195,10 +290,17 @@ function App({ client = apiClient }: AppProps) {
                 <SessionControls
                   session={session}
                   onStart={handleStartSession}
-                  onEnd={endSession}
+                  onPauseCapture={pauseCapture}
+                  onResumeCapture={resumeCapture}
+                  onEnd={handleEndSession}
                   requestState={requestState}
                   loadingAction={loadingAction}
+                  failedAction={failedAction}
                   error={sessionError}
+                  captureError={captureError}
+                  captureActionPending={captureActionPending}
+                  networkStatus={networkStatus}
+                  onRetry={handleRetrySessionRequest}
                   onSessionEnded={focusNewSession}
                 />
               </div>
@@ -281,7 +383,11 @@ function App({ client = apiClient }: AppProps) {
 
           <aside className="right-rail" aria-label="Session tools">
             <MicrophonePanel />
-            <section className="panel api-panel" aria-labelledby="api-heading">
+            <section
+              className="panel api-panel"
+              aria-labelledby="api-heading"
+              aria-busy={visibleApiState.status === 'loading'}
+            >
               <div className="panel-heading">
                 <div>
                   <p className="eyebrow">FOUNDATION</p>
@@ -297,27 +403,48 @@ function App({ client = apiClient }: AppProps) {
                   : 'Typed client using the configured HTTP API.'}
               </p>
               <div
-                className={`api-feedback api-${apiState.status}`}
-                role={apiState.status === 'error' ? 'alert' : 'status'}
-                aria-live={apiState.status === 'error' ? 'assertive' : 'polite'}
-                aria-busy={apiState.status === 'loading'}
+                ref={apiFeedbackRef}
+                className={`api-feedback api-${visibleApiState.status}`}
+                role={visibleApiState.status === 'error' ? 'alert' : 'status'}
+                aria-live={visibleApiState.status === 'error' ? 'assertive' : 'polite'}
+                aria-busy={visibleApiState.status === 'loading'}
+                tabIndex={visibleApiState.status === 'error' ? -1 : undefined}
               >
-                {apiState.status === 'loading' ? (
+                {visibleApiState.status === 'offline' ? (
                   <>
-                    <LoaderCircle
-                      className="api-loading-spinner"
-                      size={15}
-                      aria-hidden="true"
-                    />
+                    <WifiOff className="api-feedback-icon" size={15} aria-hidden="true" />
+                    <strong>Offline</strong>
+                    <span>
+                      Network unavailable. Local demo data remains available; network-backed data
+                      needs a connection.
+                    </span>
+                  </>
+                ) : visibleApiState.status === 'loading' ? (
+                  <>
+                    <LoaderCircle className="api-loading-spinner" size={15} aria-hidden="true" />
+                    <strong>Loading</strong>
                     <span>Loading session details and health status…</span>
                   </>
                 ) : (
                   <>
-                    <span className="api-feedback-dot" aria-hidden="true" />
+                    {visibleApiState.status === 'error' ? (
+                      <CircleAlert className="api-feedback-icon" size={15} aria-hidden="true" />
+                    ) : visibleApiState.status === 'success' ? (
+                      <CheckCircle2 className="api-feedback-icon" size={15} aria-hidden="true" />
+                    ) : (
+                      <Circle className="api-feedback-icon" size={15} aria-hidden="true" />
+                    )}
+                    <strong>
+                      {visibleApiState.status === 'error'
+                        ? 'Request failed'
+                        : visibleApiState.status === 'success'
+                          ? 'Success'
+                          : 'Ready'}
+                    </strong>
                     <span>
-                      {apiState.status === 'error'
-                        ? apiState.message
-                        : apiState.status === 'success'
+                      {visibleApiState.status === 'error'
+                        ? visibleApiState.message
+                        : visibleApiState.status === 'success'
                           ? 'Session details loaded successfully. Health check passed.'
                           : session?.status === 'ready'
                             ? 'Start the session to load its sample transcript.'
@@ -326,47 +453,58 @@ function App({ client = apiClient }: AppProps) {
                   </>
                 )}
               </div>
-              {apiState.status === 'error' && (
-                <p className="api-retry-guidance">
-                  Check the connection or mock scenario, then retry the session load.
-                </p>
+              {visibleApiState.status === 'error' && (
+                <p className="api-retry-guidance">Your previous session data is still available.</p>
               )}
-              {apiState.status === 'success' && (
+              {apiResponse && (
                 <div className="api-response-details">
                   <section className="api-session-details" aria-labelledby="api-session-details">
                     <h3 id="api-session-details">Session response</h3>
-                    <pre>{formatApiResponse(apiState.session)}</pre>
+                    <pre>{formatApiResponse(apiResponse.session)}</pre>
                   </section>
                   <section className="api-session-details" aria-labelledby="api-health-details">
                     <h3 id="api-health-details">Health response</h3>
-                    <pre>{formatApiResponse(apiState.health)}</pre>
+                    <pre>{formatApiResponse(apiResponse.health)}</pre>
                   </section>
                 </div>
               )}
               <div className="api-actions">
                 <button
-                  className="button button-outline"
+                  ref={apiRetryButtonRef}
+                  className={`button ${visibleApiState.status === 'error' ? 'button-primary' : 'button-outline'}`}
                   type="button"
+                  aria-live="polite"
                   aria-label={
-                    apiState.status === 'error'
-                      ? 'Retry loading mock session (local data)'
+                    visibleApiState.status === 'error'
+                      ? 'Retry session load'
                       : 'Load mock session (local data)'
                   }
                   onClick={() => loadWorkspace()}
+                  aria-busy={visibleApiState.status === 'loading'}
                   disabled={
-                    apiState.status === 'loading' ||
+                    visibleApiState.status === 'loading' ||
+                    visibleApiState.status === 'offline' ||
                     (session?.status !== 'active' && session?.status !== 'ended')
                   }
                 >
-                  <RefreshCw size={14} aria-hidden="true" />
-                  {apiState.status === 'loading'
+                  {visibleApiState.status === 'loading' ? (
+                    <LoaderCircle className="loading-spinner" size={14} aria-hidden="true" />
+                  ) : (
+                    <RefreshCw size={14} aria-hidden="true" />
+                  )}
+                  {visibleApiState.status === 'loading'
                     ? 'Loading…'
-                    : apiState.status === 'error'
-                      ? 'Retry session load'
+                    : visibleApiState.status === 'error'
+                      ? 'Retry'
                       : 'Load mock session'}
                 </button>
               </div>
             </section>
+            <ToolApprovalDemo />
+            <ContextSourcesPanel
+              sources={session?.contextPanel.sources ?? []}
+              onToggleSource={setContextSourceEnabled}
+            />
             <section className="panel api-overview" aria-labelledby="api-overview-heading">
               <div className="panel-heading">
                 <div>
@@ -375,8 +513,8 @@ function App({ client = apiClient }: AppProps) {
                 </div>
               </div>
               <p className="panel-description">
-                Contract capability routes. Methods, paths, and schemas require backend
-                validation before implementation.
+                Contract capability routes. Methods, paths, and schemas require backend validation
+                before implementation.
               </p>
               <ul className="api-route-list">
                 {apiRouteOverview.map((route) => (

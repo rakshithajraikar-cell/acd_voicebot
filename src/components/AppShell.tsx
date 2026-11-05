@@ -1,11 +1,21 @@
-import type { ReactNode } from 'react';
-import { AudioLines, Command, Plus, Settings2, Sparkles } from 'lucide-react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  AudioLines,
+  CircleAlert,
+  Command,
+  LoaderCircle,
+  Plus,
+  Settings2,
+  Sparkles,
+} from 'lucide-react';
+import type { NetworkStatus } from '../services/sessionService';
 
 type AppShellProps = {
   children: ReactNode;
   onNewSession: () => void;
   isSessionLoading: boolean;
   isCreatingSession: boolean;
+  networkStatus: NetworkStatus;
 };
 
 export function AppShell({
@@ -13,7 +23,20 @@ export function AppShell({
   onNewSession,
   isSessionLoading,
   isCreatingSession,
+  networkStatus,
 }: AppShellProps) {
+  const previousNetworkStatus = useRef(networkStatus);
+  const [networkAnnouncement, setNetworkAnnouncement] = useState('');
+
+  useEffect(() => {
+    if (previousNetworkStatus.current !== networkStatus) {
+      setNetworkAnnouncement(
+        networkStatus === 'online' ? 'Connection restored. Session actions are available.' : '',
+      );
+      previousNetworkStatus.current = networkStatus;
+    }
+  }, [networkStatus]);
+
   return (
     <div className="app-shell">
       <a
@@ -43,10 +66,15 @@ export function AppShell({
           type="button"
           aria-label="New session"
           aria-busy={isCreatingSession}
+          aria-live="polite"
           onClick={onNewSession}
           disabled={isSessionLoading}
         >
-          <Plus size={16} aria-hidden="true" />
+          {isCreatingSession ? (
+            <LoaderCircle className="loading-spinner" size={16} aria-hidden="true" />
+          ) : (
+            <Plus size={16} aria-hidden="true" />
+          )}
           <span>{isCreatingSession ? 'Creating…' : 'New Session'}</span>
           <span className="shortcut">
             <Command size={12} aria-hidden="true" /> K
@@ -92,16 +120,44 @@ export function AppShell({
       </aside>
 
       <div className="workspace">
-        <header className="topbar">
+        <header className="topbar" aria-busy={isCreatingSession}>
           <div
-            className="mock-mode-banner"
-            role="status"
-            aria-label="Mock mode status"
-            aria-live="polite"
+            className={`mock-mode-banner${networkStatus === 'offline' ? ' mock-mode-banner-offline' : ''}`}
           >
-            <span className="mock-mode-indicator" aria-hidden="true" />
-            <strong>MOCK MODE</strong>
-            <span>Mock data is in use — no AI service is connected.</span>
+            <div
+              className="visually-hidden"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+              aria-label="Network recovery"
+            >
+              {networkAnnouncement}
+            </div>
+            <div className="mock-mode-status" role="status" aria-label="Mock mode status">
+              <span className="mock-mode-indicator" aria-hidden="true" />
+              <strong>MOCK MODE</strong>
+              <span>Mock data is in use — no AI service is connected.</span>
+            </div>
+            {isCreatingSession && (
+              <div className="visually-hidden" role="status" aria-live="polite" aria-atomic="true">
+                Creating session…
+              </div>
+            )}
+            {networkStatus === 'offline' && (
+              <div
+                className="offline-status"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+                aria-label="Network status"
+              >
+                <CircleAlert size={14} aria-hidden="true" />
+                <strong>Offline</strong>
+                <span>
+                  You’re offline. Session actions will resume when the connection returns.
+                </span>
+              </div>
+            )}
           </div>
           <div className="topbar-content">
             <div className="topbar-mobile-brand">

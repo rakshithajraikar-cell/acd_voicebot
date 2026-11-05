@@ -12,7 +12,8 @@ function isMockScenario(value: string): value is MockApiScenario {
     value === 'success' ||
     value === 'session-not-found' ||
     value === 'server-error' ||
-    value === 'network-failure'
+    value === 'network-failure' ||
+    value === 'transient-error'
   );
 }
 

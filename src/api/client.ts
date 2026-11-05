@@ -21,10 +21,7 @@ export type MockApiClientResponses = Readonly<{
 }>;
 
 export type MockApiScenario =
-  | 'success'
-  | 'session-not-found'
-  | 'server-error'
-  | 'network-failure';
+  'success' | 'session-not-found' | 'server-error' | 'network-failure' | 'transient-error';
 
 export type MockApiClientOptions = Readonly<{
   scenario?: MockApiScenario;
@@ -80,6 +77,7 @@ export class ApiClientError extends Error {
 export class MockApiClient implements ApiClient {
   private readonly scenario: MockApiScenario;
   private readonly responses: MockApiClientResponses;
+  private transientErrorReturned = false;
 
   constructor(options: MockApiClientOptions = {}) {
     this.scenario = options.scenario ?? 'success';
@@ -95,6 +93,10 @@ export class MockApiClient implements ApiClient {
   }
 
   async getSession(request: SessionRetrievalRequest): Promise<SessionRetrievalResponse> {
+    if (this.scenario === 'transient-error' && !this.transientErrorReturned) {
+      this.transientErrorReturned = true;
+      throw createMockHttpError(500, 'TEMPORARY_SERVER_ERROR', 'Temporary mock server failure.');
+    }
     if (this.scenario === 'session-not-found') {
       throw createMockHttpError(
         404,

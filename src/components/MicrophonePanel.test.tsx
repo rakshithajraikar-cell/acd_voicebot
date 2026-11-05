@@ -1,138 +1,112 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MicrophonePanel } from './MicrophonePanel';
-
-function stubMediaDevices(mediaDevices: object | undefined) {
-  const testNavigator = Object.create(navigator) as Navigator;
-  Object.defineProperty(testNavigator, 'mediaDevices', {
-    configurable: true,
-    value: mediaDevices,
-  });
-  vi.stubGlobal('navigator', testNavigator);
-}
+import * as microphonePermissionService from '../services/microphonePermissionService';
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
-describe('microphone permission states', () => {
-  it('starts in a clear, user-controlled prompt state', () => {
+describe('mock microphone panel', () => {
+  it('explains that the microphone is simulated and needs no browser permission', () => {
     const getUserMedia = vi.fn();
-    stubMediaDevices({ getUserMedia });
+    const testNavigator = Object.create(navigator) as Navigator;
+    Object.defineProperty(testNavigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia },
+    });
+    vi.stubGlobal('navigator', testNavigator);
     render(<MicrophonePanel />);
 
-    expect(screen.getByText('Microphone is off')).toBeInTheDocument();
-    const enableButton = screen.getByRole('button', { name: 'Enable microphone' });
-    expect(enableButton).toBeEnabled();
+    expect(screen.getByText('Mock microphone is off')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Enable mock microphone' })).toBeEnabled();
     expect(
       screen.getByText(
-        'To use this feature, your browser will ask for microphone access. This week’s mock flow does not record, upload, or transmit audio.',
+        'This demo does not request browser microphone permission, record audio, or transmit audio.',
       ),
     ).toBeInTheDocument();
-    expect(enableButton).toHaveAttribute(
-      'aria-describedby',
-      'microphone-next-step microphone-privacy-disclosure',
-    );
     expect(getUserMedia).not.toHaveBeenCalled();
   });
 
-  it('reports when microphone access is unavailable', async () => {
+  it('announces simulated readiness without opening a device', async () => {
     const user = userEvent.setup();
-    stubMediaDevices(undefined);
+    const getUserMedia = vi.fn();
+    const testNavigator = Object.create(navigator) as Navigator;
+    Object.defineProperty(testNavigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia },
+    });
+    vi.stubGlobal('navigator', testNavigator);
     render(<MicrophonePanel />);
 
-    await user.click(screen.getByRole('button', { name: 'Enable microphone' }));
+    const status = screen.getByRole('status');
+    expect(status).toHaveAttribute('aria-live', 'polite');
+    expect(status).toBeEmptyDOMElement();
+    await user.click(screen.getByRole('button', { name: 'Enable mock microphone' }));
+    expect(screen.getByText('Preparing mock microphone').closest('.permission-copy')).toHaveFocus();
 
-    expect(screen.getByRole('status')).toHaveTextContent('Microphone access unsupported');
-    expect(
-      screen.getByText('Use a supported browser with microphone access enabled.'),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole('button', { name: 'Try again: microphone permission' }),
-    ).not.toBeInTheDocument();
-  });
-
-  it('explains when permission is denied', async () => {
-    const user = userEvent.setup();
-    stubMediaDevices({
-      getUserMedia: vi
-        .fn()
-        .mockRejectedValue(new DOMException('Permission denied', 'NotAllowedError')),
-    });
-    render(<MicrophonePanel />);
-
-    await user.click(screen.getByRole('button', { name: 'Enable microphone' }));
-
-    expect(await screen.findByRole('status')).toHaveTextContent('Microphone access denied');
-    expect(
-      screen.getByText('Allow microphone access in your browser site permissions, then try again.'),
-    ).toBeInTheDocument();
-  });
-
-  it('stops the stream immediately after permission is granted', async () => {
-    const user = userEvent.setup();
-    const stop = vi.fn();
-    const getUserMedia = vi.fn().mockResolvedValue({
-      getTracks: () => [{ stop }],
-    });
-    stubMediaDevices({
-      getUserMedia,
-    });
-    render(<MicrophonePanel />);
-
-    expect(getUserMedia).not.toHaveBeenCalled();
-    await user.click(screen.getByRole('button', { name: 'Enable microphone' }));
-
-    expect(await screen.findByRole('status')).toHaveTextContent('Microphone access granted');
-    expect(getUserMedia).toHaveBeenCalledOnce();
-    expect(getUserMedia).toHaveBeenCalledWith({ audio: true });
-    expect(stop).toHaveBeenCalledOnce();
+    expect(await screen.findByText('Mock microphone ready')).toBeInTheDocument();
+    await waitFor(() => expect(status).toHaveTextContent('Microphone ready.'));
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
-    expect(
-      screen.getByText(
-        'To use this feature, your browser will ask for microphone access. This week’s mock flow does not record, upload, or transmit audio.',
-      ),
-    ).toBeInTheDocument();
+    expect(getUserMedia).not.toHaveBeenCalled();
   });
 
-  it('shows requesting state while waiting for the browser permission result', async () => {
-    let resolveRequest!: (stream: MediaStream) => void;
-    stubMediaDevices({
-      getUserMedia: vi.fn(
-        () =>
-          new Promise<MediaStream>((resolve) => {
-            resolveRequest = resolve;
-          }),
-      ),
+  it('shows an accessible loading state while simulated readiness is pending', async () => {
+    const getUserMedia = vi.fn();
+    const testNavigator = Object.create(navigator) as Navigator;
+    Object.defineProperty(testNavigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia },
     });
+    vi.stubGlobal('navigator', testNavigator);
     render(<MicrophonePanel />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Enable microphone' }));
+    const enableButton = screen.getByRole('button', { name: 'Enable mock microphone' });
+    fireEvent.click(enableButton);
+    fireEvent.click(enableButton);
 
-    expect(screen.getByRole('status')).toHaveTextContent('Waiting for permission');
-    expect(screen.getByRole('button', { name: 'Requesting microphone permission' })).toBeDisabled();
+    const panel = screen.getByRole('region', { name: 'Your microphone' });
+    expect(panel).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByText('Preparing mock microphone')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Preparing mock microphone' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Preparing mock microphone' })).toHaveTextContent(
+      'Working…',
+    );
+    expect(screen.getByRole('button', { name: 'Preparing mock microphone' })).toHaveAttribute(
+      'aria-busy',
+      'true',
+    );
+    expect(
+      screen
+        .getByRole('button', { name: 'Preparing mock microphone' })
+        .querySelector('.loading-spinner'),
+    ).toBeInTheDocument();
 
-    resolveRequest({ getTracks: () => [{ stop: vi.fn() }] } as unknown as MediaStream);
-    expect(await screen.findByRole('status')).toHaveTextContent('Microphone access granted');
+    await waitFor(() => expect(screen.getByText('Mock microphone ready')).toBeInTheDocument());
+    expect(getUserMedia).not.toHaveBeenCalled();
   });
 
-  it('preserves an unexpected failure reason as a readable error message', async () => {
+  it('announces microphone denial assertively only after the permission state changes', async () => {
     const user = userEvent.setup();
-    stubMediaDevices({
-      getUserMedia: vi.fn().mockRejectedValue(new Error('Audio device initialization failed.')),
+    vi.spyOn(microphonePermissionService, 'createMicrophonePermissionService').mockReturnValue({
+      requestPermission: vi.fn(async () => ({
+        status: 'denied' as const,
+        reason: 'permission-denied' as const,
+        message: 'Microphone access was denied.',
+      })),
     });
     render(<MicrophonePanel />);
 
-    await user.click(screen.getByRole('button', { name: 'Enable microphone' }));
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Enable mock microphone' }));
 
-    expect(await screen.findByRole('status')).toHaveTextContent('Microphone request failed');
-    expect(screen.getByText('Audio device initialization failed.')).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        'Try again. If the problem continues, check browser permissions and your microphone.',
-      ),
-    ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Try again: microphone permission' })).toBeEnabled();
+    const alert = await screen.findByRole('alert');
+    await waitFor(() =>
+      expect(alert).toHaveTextContent('Microphone denied. Microphone access was denied.'),
+    );
+    expect(alert).toHaveAttribute('aria-live', 'assertive');
+    expect(screen.getByText('Microphone access denied')).toBeInTheDocument();
   });
 });

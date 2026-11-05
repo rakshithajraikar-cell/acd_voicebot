@@ -58,6 +58,7 @@ describe('API clients', () => {
         },
       },
     });
+
     await expect(notFound.healthCheck()).resolves.toEqual({ status: 'healthy' });
 
     const serverError = new MockApiClient({ scenario: 'server-error' });
@@ -71,9 +72,7 @@ describe('API clients', () => {
     });
 
     const networkFailure = new MockApiClient({ scenario: 'network-failure' });
-    await expect(
-      networkFailure.getSession({ session_id: 'session-001' }),
-    ).rejects.toMatchObject({
+    await expect(networkFailure.getSession({ session_id: 'session-001' })).rejects.toMatchObject({
       kind: 'network',
       status: undefined,
       message: 'Mock network failure.',
@@ -82,6 +81,21 @@ describe('API clients', () => {
       kind: 'network',
       status: undefined,
     });
+  });
+
+  it('recovers after one configured transient mock server error', async () => {
+    const client = new MockApiClient({ scenario: 'transient-error' });
+
+    await expect(client.getSession({ session_id: 'session-001' })).rejects.toMatchObject({
+      kind: 'http',
+      status: 500,
+      message: 'Temporary mock server failure.',
+    });
+    await expect(client.getSession({ session_id: 'session-001' })).resolves.toMatchObject({
+      id: 'session-001',
+      status: 'ready',
+    });
+    await expect(client.healthCheck()).resolves.toEqual({ status: 'healthy' });
   });
 
   it('supports mock and HTTP configuration through the same client boundary', () => {
@@ -93,13 +107,18 @@ describe('API clients', () => {
     ).toEqual({ mode: 'mock', scenario: 'network-failure' });
     expect(
       resolveApiClientConfiguration({
+        VITE_API_MOCK_SCENARIO: 'transient-error',
+      }),
+    ).toEqual({ mode: 'mock', scenario: 'transient-error' });
+    expect(
+      resolveApiClientConfiguration({
         VITE_API_CLIENT_MODE: 'http',
         VITE_API_BASE_URL: 'https://api.example.test',
       }),
     ).toEqual({ mode: 'http', baseUrl: 'https://api.example.test' });
-    expect(() =>
-      resolveApiClientConfiguration({ VITE_API_CLIENT_MODE: 'remote' }),
-    ).toThrow('Unsupported VITE_API_CLIENT_MODE: remote');
+    expect(() => resolveApiClientConfiguration({ VITE_API_CLIENT_MODE: 'remote' })).toThrow(
+      'Unsupported VITE_API_CLIENT_MODE: remote',
+    );
   });
 
   it('calls only the documented session and health GET routes', async () => {

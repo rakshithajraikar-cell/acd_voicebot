@@ -1,10 +1,11 @@
 import {
   createSession as createSessionModel,
+  applyCaptureLifecycleEvent,
   endSession as endSessionModel,
   startSession as startSessionModel,
   updateSessionTitle,
 } from '../models/session';
-import type { Session } from '../models/session';
+import type { CaptureLifecycleEvent, ContextSource, Session } from '../models/session';
 
 export type SessionServiceError = Readonly<{
   code: 'not-found' | 'invalid-state' | 'invalid-title';
@@ -14,8 +15,11 @@ export type SessionServiceError = Readonly<{
 export type SessionServiceResult<T> =
   Readonly<{ ok: true; data: T }> | Readonly<{ ok: false; error: SessionServiceError }>;
 
+export type NetworkStatus = 'online' | 'offline';
+
 export type SessionService = Readonly<{
   initialSession: Session | null;
+  networkStatus: NetworkStatus;
   createSession(
     title: string,
     id?: string,
@@ -23,7 +27,19 @@ export type SessionService = Readonly<{
   ): Promise<SessionServiceResult<Session>>;
   startSession(sessionId: string, startedAt?: Date): Promise<SessionServiceResult<Session>>;
   endSession(sessionId: string, endedAt?: Date): Promise<SessionServiceResult<Session>>;
+  recordCaptureEvent(
+    sessionId: string,
+    event: CaptureLifecycleEvent,
+    occurredAt?: Date,
+  ): SessionServiceResult<Session>;
   renameSession(sessionId: string, title: string): SessionServiceResult<Session>;
+  setContextSourceEnabled(
+    sessionId: string,
+    sourceId: string,
+    enabled: boolean,
+  ): SessionServiceResult<Session>;
+  getEnabledContextSources(sessionId: string): SessionServiceResult<readonly ContextSource[]>;
+  setNetworkStatus(status: NetworkStatus): void;
 }>;
 
 type MockSessionServiceOptions = Readonly<{
@@ -48,6 +64,7 @@ export function createMockSessionService({
   now = () => new Date(),
 }: MockSessionServiceOptions): SessionService {
   const sessions = new Map<string, Session>();
+  let networkStatus: NetworkStatus = 'online';
   if (initialSession) {
     sessions.set(initialSession.id, initialSession);
   }
@@ -87,7 +104,7 @@ export function createMockSessionService({
     const updatedSession = startSessionModel(session, startedAt);
     sessions.set(sessionId, updatedSession);
     await delay();
-    return { ok: true, data: updatedSession };
+    return { ok: true, data: sessions.get(sessionId) ?? updatedSession };
   }
 
   async function endSession(
@@ -101,11 +118,39 @@ export function createMockSessionService({
     if (session.status !== 'active') {
       return serviceError('invalid-state', 'Only an active session can be ended.');
     }
+    if (session.captureState !== 'idle' && session.captureState !== 'ended') {
+      return serviceError(
+        'invalid-state',
+        'Stop microphone capture and wait for its ended event before ending the session.',
+      );
+    }
 
     const updatedSession = endSessionModel(session, endedAt);
     sessions.set(sessionId, updatedSession);
     await delay();
     return { ok: true, data: updatedSession };
+  }
+
+  function recordCaptureEvent(
+    sessionId: string,
+    event: CaptureLifecycleEvent,
+    occurredAt = now(),
+  ): SessionServiceResult<Session> {
+    const session = sessions.get(sessionId);
+    if (!session) {
+      return serviceError('not-found', 'This session could not be found.');
+    }
+
+    const transition = applyCaptureLifecycleEvent(session, event, occurredAt);
+    if (!transition.ok) {
+      return serviceError(
+        'invalid-state',
+        `Capture cannot transition from ${transition.state} to ${event.type}.`,
+      );
+    }
+
+    sessions.set(sessionId, transition.session);
+    return { ok: true, data: transition.session };
   }
 
   function renameSession(sessionId: string, title: string): SessionServiceResult<Session> {
@@ -123,5 +168,65 @@ export function createMockSessionService({
     return { ok: true, data: updatedSession };
   }
 
-  return { initialSession, createSession, startSession, endSession, renameSession };
+  function setContextSourceEnabled(
+    sessionId: string,
+    sourceId: string,
+    enabled: boolean,
+  ): SessionServiceResult<Session> {
+    const session = sessions.get(sessionId);
+    if (!session) {
+      return serviceError('not-found', 'This session could not be found.');
+    }
+
+    const source = session.contextPanel.sources.find((item) => item.id === sourceId);
+    if (!source) {
+      return serviceError('not-found', 'This context source could not be found.');
+    }
+
+    const updatedSource: ContextSource = { ...source, enabled };
+    const updatedSession: Session = {
+      ...session,
+      contextPanel: {
+        ...session.contextPanel,
+        sources: session.contextPanel.sources.map((item) =>
+          item.id === sourceId ? updatedSource : item,
+        ),
+      },
+    };
+    sessions.set(sessionId, updatedSession);
+    return { ok: true, data: updatedSession };
+  }
+
+  function getEnabledContextSources(
+    sessionId: string,
+  ): SessionServiceResult<readonly ContextSource[]> {
+    const session = sessions.get(sessionId);
+    if (!session) {
+      return serviceError('not-found', 'This session could not be found.');
+    }
+
+    return {
+      ok: true,
+      data: session.contextPanel.sources.filter((source) => source.enabled),
+    };
+  }
+
+  function setNetworkStatus(status: NetworkStatus): void {
+    networkStatus = status;
+  }
+
+  return {
+    initialSession,
+    get networkStatus() {
+      return networkStatus;
+    },
+    createSession,
+    startSession,
+    endSession,
+    recordCaptureEvent,
+    renameSession,
+    setContextSourceEnabled,
+    getEnabledContextSources,
+    setNetworkStatus,
+  };
 }

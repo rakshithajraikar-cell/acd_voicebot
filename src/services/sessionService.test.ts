@@ -67,4 +67,154 @@ describe('mock session service', () => {
       },
     });
   });
+
+  it('stores network status separately from session operation errors', () => {
+    const service = makeService();
+
+    expect(service.networkStatus).toBe('online');
+    service.setNetworkStatus('offline');
+    expect(service.networkStatus).toBe('offline');
+    service.setNetworkStatus('online');
+    expect(service.networkStatus).toBe('online');
+  });
+
+  it('keeps screen context disabled by default until explicitly enabled', async () => {
+    const initialSession = createSession('session-3', 'Context check', createdAt);
+    const contextService = createMockSessionService({
+      initialSession,
+      latencyMs: 0,
+    });
+
+    expect(initialSession.contextPanel.sources).toEqual([
+      { id: 'screen-context', label: 'Screen context', type: 'screen', enabled: false },
+    ]);
+    expect(contextService.getEnabledContextSources(initialSession.id)).toEqual({
+      ok: true,
+      data: [],
+    });
+
+    const startedSession = await contextService.startSession(initialSession.id);
+    expect(startedSession).toMatchObject({
+      ok: true,
+      data: { contextPanel: { sources: [{ id: 'screen-context', enabled: false }] } },
+    });
+
+    const enabled = contextService.setContextSourceEnabled(
+      initialSession.id,
+      'screen-context',
+      true,
+    );
+    expect(enabled).toMatchObject({
+      ok: true,
+      data: {
+        contextPanel: {
+          sources: [{ id: 'screen-context', type: 'screen', enabled: true }],
+        },
+      },
+    });
+    if (!enabled.ok) throw new Error('Expected explicit context opt-in to succeed.');
+    expect(contextService.getEnabledContextSources(initialSession.id)).toEqual({
+      ok: true,
+      data: [{ id: 'screen-context', label: 'Screen context', type: 'screen', enabled: true }],
+    });
+
+    const captureReady = contextService.recordCaptureEvent(initialSession.id, { type: 'ready' });
+    expect(captureReady).toMatchObject({
+      ok: true,
+      data: { contextPanel: { sources: [{ enabled: true }] } },
+    });
+  });
+
+  it('does not expose disabled screen sources in context data for processing', () => {
+    const session = createSession('session-context-filter', 'Context filter', createdAt);
+    const service = createMockSessionService({ initialSession: session, latencyMs: 0 });
+
+    const enabled = service.setContextSourceEnabled(session.id, 'screen-context', true);
+    expect(enabled.ok).toBe(true);
+    expect(service.getEnabledContextSources(session.id)).toMatchObject({
+      ok: true,
+      data: [{ id: 'screen-context', type: 'screen', enabled: true }],
+    });
+
+    const disabled = service.setContextSourceEnabled(session.id, 'screen-context', false);
+    expect(disabled).toMatchObject({
+      ok: true,
+      data: {
+        contextPanel: {
+          sources: [{ id: 'screen-context', type: 'screen', enabled: false }],
+        },
+      },
+    });
+    const context = service.getEnabledContextSources(session.id);
+    expect(context).toEqual({ ok: true, data: [] });
+    if (context.ok) {
+      expect(context.data.some((source) => source.type === 'screen')).toBe(false);
+    }
+  });
+
+  it('stores capture state and timestamps only when lifecycle events are recorded', async () => {
+    const service = makeService();
+    const started = await service.startSession('session-1');
+    expect(started.ok).toBe(true);
+
+    const ready = service.recordCaptureEvent('session-1', { type: 'ready' }, startedAt);
+    expect(ready).toMatchObject({ ok: true, data: { captureState: 'ready' } });
+
+    const capturing = service.recordCaptureEvent('session-1', { type: 'started' }, startedAt);
+    expect(capturing).toMatchObject({ ok: true, data: { captureState: 'capturing' } });
+
+    const pausedAt = new Date('2026-10-30T00:02:00.000Z');
+    const paused = service.recordCaptureEvent('session-1', { type: 'paused' }, pausedAt);
+    expect(paused).toMatchObject({
+      ok: true,
+      data: { captureState: 'paused', pausedAt: pausedAt.toISOString(), resumedAt: null },
+    });
+
+    const resumedAt = new Date('2026-10-30T00:03:00.000Z');
+    const resumed = service.recordCaptureEvent('session-1', { type: 'resumed' }, resumedAt);
+    expect(resumed).toMatchObject({
+      ok: true,
+      data: {
+        captureState: 'capturing',
+        pausedAt: pausedAt.toISOString(),
+        resumedAt: resumedAt.toISOString(),
+      },
+    });
+
+    expect(service.recordCaptureEvent('session-1', { type: 'ended' }, resumedAt)).toMatchObject({
+      ok: true,
+      data: { captureState: 'ended' },
+    });
+  });
+
+  it('rejects capture events that do not match the stored capture state', () => {
+    const service = makeService();
+
+    expect(service.recordCaptureEvent('session-1', { type: 'paused' })).toEqual({
+      ok: false,
+      error: {
+        code: 'invalid-state',
+        message: 'Capture cannot transition from idle to paused.',
+      },
+    });
+  });
+
+  it('requires capture to emit ended before ending a capturing or paused session', async () => {
+    const service = makeService();
+    await service.startSession('session-1');
+    service.recordCaptureEvent('session-1', { type: 'ready' }, startedAt);
+    service.recordCaptureEvent('session-1', { type: 'started' }, startedAt);
+    service.recordCaptureEvent('session-1', { type: 'paused' }, startedAt);
+
+    await expect(service.endSession('session-1')).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'invalid-state' },
+    });
+
+    service.recordCaptureEvent('session-1', { type: 'ended' }, startedAt);
+    await expect(service.endSession('session-1')).resolves.toMatchObject({
+      ok: true,
+      data: { status: 'ended', captureState: 'ended' },
+    });
+  });
 });

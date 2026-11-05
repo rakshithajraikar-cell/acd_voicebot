@@ -13,6 +13,15 @@ describe('mock demo workspace service', () => {
         type: 'system',
         text: 'Session started.',
       });
+      expect(
+        result.data.transcript.some((event) =>
+          /screen context|screen capture|screen contents/i.test(event.text),
+        ),
+      ).toBe(false);
+      result.data.transcript.forEach((event) => {
+        expect(event).not.toHaveProperty('contextSources');
+        expect(event).not.toHaveProperty('screenContext');
+      });
     }
   });
 
