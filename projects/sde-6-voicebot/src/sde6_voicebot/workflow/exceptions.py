@@ -1,6 +1,6 @@
 """Exceptions for the workflow engine."""
 
-from typing import Optional
+from typing import Optional, Set
 from sde6_voicebot.contracts.common import WorkflowState, ErrorEnvelope
 
 
@@ -54,3 +54,52 @@ class ToolSecurityError(WorkflowEngineError):
     def __init__(self, message: str, tool_name: str, correlation_id: str = "unknown"):
         super().__init__(message, code="UNAUTHORIZED_TOOL_ATTEMPT", correlation_id=correlation_id)
         self.tool_name = tool_name
+
+
+class PermissionScopeError(ToolSecurityError):
+    """Raised when the execution context lacks the required permission scope for a tool."""
+
+    def __init__(
+        self,
+        message: str,
+        tool_name: str,
+        required_scope: str,
+        granted_scopes: Optional[Set[str]] = None,
+        correlation_id: str = "unknown",
+    ):
+        super().__init__(message, tool_name=tool_name, correlation_id=correlation_id)
+        self.code = "PERMISSION_SCOPE_DENIED"
+        self.required_scope = required_scope
+        self.granted_scopes = granted_scopes or set()
+
+
+class ToolArgumentError(ToolExecutionError):
+    """Raised when tool arguments fail parameter schema or type validation."""
+
+    def __init__(self, message: str, tool_name: str, correlation_id: str = "unknown"):
+        super().__init__(message, tool_name=tool_name, correlation_id=correlation_id)
+        self.code = "INVALID_TOOL_ARGUMENTS"
+
+
+class ApprovalExpiredError(WorkflowEngineError):
+    """Raised when an approval request has expired and cannot be approved."""
+
+    def __init__(self, message: str, request_id: str = "unknown", correlation_id: str = "unknown"):
+        super().__init__(message, code="APPROVAL_EXPIRED", correlation_id=correlation_id)
+        self.request_id = request_id
+
+
+class WorkflowTimeoutError(WorkflowEngineError):
+    """Raised when step execution or tool invocation exceeds the configured timeout."""
+
+    def __init__(self, message: str, step_id: str = "unknown", timeout_seconds: float = 0.0, correlation_id: str = "unknown"):
+        super().__init__(message, code="WORKFLOW_TIMEOUT", correlation_id=correlation_id)
+        self.step_id = step_id
+        self.timeout_seconds = timeout_seconds
+
+
+class WorkflowCancelledError(WorkflowEngineError):
+    """Raised when an operation is attempted on an already cancelled workflow."""
+
+    def __init__(self, message: str, correlation_id: str = "unknown"):
+        super().__init__(message, code="WORKFLOW_CANCELLED", correlation_id=correlation_id)

@@ -1,10 +1,10 @@
 """Workflow contract schemas according to W4 deliverables and engineering standards.
 
 Includes:
-- ToolSpec
-- ApprovalRequest
-- WorkflowStep
-- WorkflowPlan
+- ToolSpec (with idempotency and permission scopes)
+- ApprovalRequest (with expiry logic and TTL)
+- WorkflowStep (with timeout and bounded retry parameters)
+- WorkflowPlan (with DAG validation and cycle detection)
 - WorkflowResult
 """
 
@@ -40,7 +40,9 @@ class StepStatus(str, Enum):
 class ToolSpec(BaseModel):
     """Specification of an allowed tool.
     
-    Safety rule: Consequential tools default to requiring explicit user approval.
+    Safety rules:
+    - Consequential tools default to requiring explicit user approval.
+    - Idempotent tools are safe for bounded retries; non-idempotent tools must never retry.
     """
     model_config = ConfigDict(frozen=True)
 
@@ -49,6 +51,7 @@ class ToolSpec(BaseModel):
     description: str = Field(..., description="Clear explanation of the tool's behavior and constraints")
     parameters_schema: Dict[str, Any] = Field(default_factory=dict, description="JSON Schema for input parameters")
     is_consequential: bool = Field(default=True, description="True if action has external, stateful, or persistent consequences")
+    is_idempotent: bool = Field(default=False, description="True if repeated executions produce identical side effects and are safe to retry")
     permission_scope: str = Field(default="safe.mock", description="Security and permission scope")
     version: str = Field(default="1.0.0", description="Tool schema version")
 
@@ -56,7 +59,9 @@ class ToolSpec(BaseModel):
 class ApprovalRequest(BaseModel):
     """Schema for human approval requests for consequential actions.
     
-    A consequential action will never execute unless an ApprovalRequest transitions to APPROVED.
+    Safety rules:
+    - A consequential action will never execute unless an ApprovalRequest transitions to APPROVED.
+    - A rejected or expired approval strictly guarantees no tool execution.
     """
     model_config = ConfigDict(frozen=True)
 
@@ -72,6 +77,17 @@ class ApprovalRequest(BaseModel):
     decided_at: Optional[datetime] = Field(default=None, description="Timestamp of user decision")
     decided_by: Optional[str] = Field(default=None, description="Actor or username who made the decision")
     rejection_reason: Optional[str] = Field(default=None, description="User or system rationale if rejected")
+    expires_at: Optional[datetime] = Field(default=None, description="Expiry timestamp in UTC")
+    ttl_seconds: Optional[float] = Field(default=300.0, description="Time-to-live in seconds before automatic expiration")
+
+    def is_expired(self, now: Optional[datetime] = None) -> bool:
+        """Check whether this approval request has passed its expiry deadline."""
+        if self.status == ApprovalStatus.EXPIRED:
+            return True
+        if self.expires_at is not None:
+            current_time = now or datetime.now(timezone.utc)
+            return current_time >= self.expires_at
+        return False
 
 
 class WorkflowStep(BaseModel):
@@ -87,6 +103,10 @@ class WorkflowStep(BaseModel):
     arguments: Dict[str, Any] = Field(default_factory=dict, description="Arguments to pass to the tool")
     depends_on: List[str] = Field(default_factory=list, description="IDs of steps that must succeed before this step runs")
     is_consequential: bool = Field(default=True, description="Consequential flag; defaults to True for safety")
+    is_idempotent: Optional[bool] = Field(default=None, description="Step-level override for tool idempotency")
+    timeout_seconds: Optional[float] = Field(default=30.0, description="Execution timeout for this step in seconds")
+    max_retries: int = Field(default=0, description="Max retry attempts for idempotent execution failures")
+    retry_count: int = Field(default=0, description="Number of retries attempted")
     status: StepStatus = Field(default=StepStatus.PENDING, description="Step lifecycle status")
     approval_id: Optional[str] = Field(default=None, description="ID of approval request if gated")
     result: Optional[Any] = Field(default=None, description="Tool execution output if succeeded")
