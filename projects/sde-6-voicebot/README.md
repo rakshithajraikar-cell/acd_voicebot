@@ -4,7 +4,8 @@
 **Assigned Student**: Pavithra P (SDE 6, Member 2)  
 **Milestones Delivered**: 
 - **Week 1 (Days 1–7)**: Transcript Schemas, Fake Transcriber & Segment Accumulator
-- **Week 2 (Days 8–14)**: Orchestration, Ordering & De-duplication, Retries & Preprocessing  
+- **Week 2 (Days 8–14)**: Orchestration, Ordering & De-duplication, Retries & Preprocessing
+- **Week 3 (Days 15–21)**: Revisions & Finalization, Mock Fallback & Event-Stream Integration  
 **Team Branch**: `team/sde-6-voicebot`  
 **Feature Branch**: `feature/w2-speech-to-text`  
 **Base Repository**: [https://github.com/Yashuudevang/acd_voicebot](https://github.com/Yashuudevang/acd_voicebot)
@@ -50,6 +51,21 @@ This module forms the foundation of the Speech-to-Text (STT) pipeline for SDE 6.
    - Live stream event broadcasting (`transcript.interim`, `transcript.final`, `transcript.error`).
    - Observability metrics tracking (chunks received, duplicates suppressed, retries, errors).
 
+#### Week 3 (Workflow & Integration)
+7. **Revisions & Confidence Thresholding (`src/accumulator/segment-accumulator.ts`)**:
+   - `transcript.revised` handling: In-place revision of segments as acoustic context clarifies earlier words.
+   - Configurable confidence threshold (e.g., 0.70) tagging low-confidence speech with uncertainty markers (`[uncertain: ...]`).
+   - Strict session isolation: Rejects foreign session events with `SESSION_MISMATCH`.
+
+8. **Provider Fallback & Cancellation (`src/providers/fallback-provider.ts`)**:
+   - `FallbackSpeechToTextAdapter`: Automatically falls back to mock provider upon primary quota exhaustion (HTTP 429), network drops, or timeouts.
+   - Cancellation: Cleanly stops in-flight transcriptions across all active providers.
+   - Dual-failure safety: Safely normalizes failures without throwing unhandled exceptions.
+
+9. **W1 Audio Gateway & W5 Backend Event Bridge (`src/integration/stream-bridge.ts`)**:
+   - `AudioEventGateway`: Sequence continuity tracking and missing-chunk gap detection.
+   - `BackendEventStreamBridge`: Reconnect & replay buffer (`replayEvents(sessionId, afterEventId)`) ensuring zero event loss across UI/backend drops.
+
 ---
 
 ## 2. Directory Structure
@@ -69,9 +85,10 @@ projects/sde-6-voicebot/
 │   ├── providers/
 │   │   ├── stt-adapter.ts         # Provider-neutral SpeechToTextAdapter interface
 │   │   ├── fake-transcriber.ts    # Deterministic mock transcriber implementation
+│   │   ├── fallback-provider.ts   # Failover fallback adapter for quota/network errors
 │   │   └── index.ts
 │   ├── accumulator/
-│   │   ├── segment-accumulator.ts # Ordered segment accumulator & interim/final reconciliation
+│   │   ├── segment-accumulator.ts # Ordered segment accumulator, revisions & confidence thresholds
 │   │   └── index.ts
 │   ├── preprocessing/
 │   │   ├── audio-preprocessor.ts  # Resampling (48k/8k -> 16k), Normalization, Downmixing
@@ -82,25 +99,33 @@ projects/sde-6-voicebot/
 │   ├── orchestrator/
 │   │   ├── transcription-orchestrator.ts # Core pipeline coordinator & metrics
 │   │   └── index.ts
+│   ├── integration/
+│   │   ├── stream-bridge.ts       # W1 Audio Gateway, gap detection & W5 Backend Event Stream Bridge
+│   │   └── index.ts
 │   ├── fixtures/
 │   │   └── transcript-fixtures.ts # Repeatable synthetic audio and edge case fixtures
 │   ├── demo/
 │   │   ├── chunk-to-transcript.ts       # Week 1 live demo
-│   │   └── week2-orchestrator-demo.ts   # Week 2 live demo
+│   │   ├── week2-orchestrator-demo.ts   # Week 2 live demo
+│   │   └── week3-integration-demo.ts    # Week 3 live demo
 │   └── index.ts                   # Unified library entry point
 └── tests/
     ├── contracts/
     │   └── transcript-schemas.test.ts        # 12 tests: schema validation, boundaries, invalid rejection
     ├── providers/
-    │   └── fake-transcriber.test.ts          # 9 tests: determinism, interim/final emission, cancellation
+    │   ├── fake-transcriber.test.ts          # 9 tests: determinism, interim/final emission, cancellation
+    │   └── fallback-provider.test.ts         # 5 tests: primary success, quota 429 fallback, network 503 fallback
     ├── accumulator/
     │   └── segment-accumulator.test.ts       # 8 tests: ordering, duplicate suppression, session boundary
     ├── preprocessing/
     │   └── audio-preprocessor.test.ts        # 5 tests: resampling (48k/8k), normalization, stereo downmix
     ├── resilience/
     │   └── retry-handler.test.ts             # 4 tests: timeouts, bounded retries, error normalization
-    └── orchestrator/
-        └── transcription-orchestrator.test.ts# 4 tests: end-to-end orchestration, duplicates, errors
+    ├── orchestrator/
+    │   └── transcription-orchestrator.test.ts# 4 tests: end-to-end orchestration, duplicates, errors
+    └── integration/
+        ├── revision-confidence.test.ts       # 3 tests: transcript.revised, confidence filtering, session mismatch
+        └── audio-gateway.test.ts             # 3 tests: W1 chunk routing, sequence gap detection, W5 event replay
 ```
 
 ---
@@ -118,46 +143,46 @@ npm install
 npm run typecheck
 ```
 
-### Run All 42 Tests
+### Run All 53 Tests
 ```powershell
 npm run test
 ```
 
-### Run Week 2 Live Demonstration
-```powershell
-npm run demo:week2
-```
+### Run Live Demos
+- **Week 1**: `npm run demo`
+- **Week 2**: `npm run demo:week2`
+- **Week 3**: `npm run demo:week3`
 
 ---
 
-## 4. Week 2 Acceptance Checklist
+## 4. Acceptance Checklist
 
 | # | Acceptance Criteria | Status | Evidence / Location |
 |---|---|:---:|---|
-| 1 | Chunk to transcript events works end-to-end in mock mode | Passed | `src/orchestrator/transcription-orchestrator.ts` |
-| 2 | Out-of-order and duplicate segments handled correctly | Passed | `tests/orchestrator/transcription-orchestrator.test.ts` |
-| 3 | Interim results reconcile into final segments | Passed | `src/accumulator/segment-accumulator.ts` |
-| 4 | Timeouts and bounded retries work safely | Passed | `tests/resilience/retry-handler.test.ts` |
-| 5 | Provider errors are normalized (no raw exceptions leak) | Passed | `src/resilience/retry-handler.ts` |
-| 6 | Resampling (48k/8k -> 16k) and Normalization tested | Passed | `tests/preprocessing/audio-preprocessor.test.ts` |
-| 7 | Zero paid API keys needed (runs 100% locally in mock mode) | Passed | `src/providers/fake-transcriber.ts` |
-| 8 | No duplicate schema definitions | Passed | Reuses Week 1 schemas in `src/contracts/` |
-| 9 | 100% test pass rate across all suites | Passed | **42/42 tests passing** |
+| 1 | Interim results revised & finalized with clear events | Passed | `src/accumulator/segment-accumulator.ts` |
+| 2 | Every transcript event carries session ID | Passed | Validated in `TranscriptEventSchema` & `EventEnvelope` |
+| 3 | Low-confidence segments handled by threshold | Passed | `tests/integration/revision-confidence.test.ts` |
+| 4 | Cancellation stops in-flight transcription cleanly | Passed | `src/providers/fallback-provider.ts` |
+| 5 | Quota & network failures fall back to mock provider | Passed | `tests/providers/fallback-provider.test.ts` |
+| 6 | Audio events flow into transcription end-to-end | Passed | `tests/integration/audio-gateway.test.ts` |
+| 7 | Transcript events reach backend event stream with replay | Passed | `src/integration/stream-bridge.ts` |
+| 8 | Missing chunks & out-of-order chunks handled | Passed | `tests/integration/audio-gateway.test.ts` |
+| 9 | 100% test pass rate across all suites | Passed | **53/53 tests passing** |
 
 ---
 
-## 5. Daily Progress Report (Week 2: Days 8–14)
+## 5. Daily Progress Report (Week 3: Days 15–21)
 
-- **Day 8–9 (Orchestration Foundation)**:
-  - Built `TranscriptionOrchestrator` connecting Audio Chunks to Provider and Accumulator.
-  - Implemented event streaming listeners for interim and final segments.
-- **Day 10–11 (Ordering, De-duplication & Reconciliation)**:
-  - Added chunk-level and segment-level deduplication.
-  - Verified out-of-order chunk arrival reordering via sequence numbers.
-- **Day 12–13 (Timeouts, Retries & Audio Preprocessing)**:
-  - Built `AudioPreprocessor` with linear interpolation resampling (8kHz / 44.1kHz / 48kHz ➔ 16kHz) and peak amplitude normalization.
-  - Implemented `RetryHandler` with exponential backoff and timeout enforcement.
-  - Created error normalizer converting all failures into standard `ErrorEnvelope`.
-- **Day 14 (Contract Tests & PR Demo)**:
-  - Added 13 new unit and contract tests (total 42 tests passing).
-  - Built and verified `src/demo/week2-orchestrator-demo.ts` CLI demo.
+- **Day 15–16 (Revisions & Confidence Thresholds)**:
+  - Added support for `transcript.revised` events to update transcript segments in-place.
+  - Implemented confidence threshold filtering and uncertainty marking (`[uncertain: ...]`).
+  - Enforced strict session isolation rejecting foreign session IDs with `SESSION_MISMATCH`.
+- **Day 17–18 (Mock Fallback & Cancellation)**:
+  - Created `FallbackSpeechToTextAdapter` with automated failover on HTTP 429 quota exhaustion and network disconnects.
+  - Implemented cooperative cancellation propagating through primary and fallback providers.
+- **Day 19–20 (W1 Audio Gateway & W5 Backend Stream Integration)**:
+  - Created `AudioEventGateway` with sequence continuity tracking and missing-chunk gap detection.
+  - Created `BackendEventStreamBridge` with chronological event caching and replay/reconnection capabilities.
+- **Day 21 (Integration Demo & Gate Approval)**:
+  - Added 11 new integration tests (total 53 tests passing).
+  - Built and verified `src/demo/week3-integration-demo.ts` live CLI demonstration.

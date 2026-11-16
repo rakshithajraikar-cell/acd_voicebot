@@ -4,4 +4,5 @@ export * from "./accumulator/index.js";
 export * from "./preprocessing/index.js";
 export * from "./resilience/index.js";
 export * from "./orchestrator/index.js";
+export * from "./integration/index.js";
 export * from "./fixtures/transcript-fixtures.js";
