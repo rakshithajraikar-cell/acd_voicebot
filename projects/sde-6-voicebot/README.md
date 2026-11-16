@@ -7,7 +7,7 @@ All team work is organized by workstream within `projects/sde-6-voicebot/` follo
 
 ## Team Workstreams & Active Feature Branches
 
-- **W1 — Audio & Voice Activity Detection (Weeks 1 & 2):** Rakshitha J Raikar (`feature/w1-audio-schemas`, `feature/w2-audio-lifecycle-vad`)
+- **W1 — Audio & Voice Activity Detection (Weeks 1, 2 & 3):** Rakshitha J Raikar (`feature/w1-audio-schemas`, `feature/w2-audio-lifecycle-vad`, `feature/w3-speech-events-recovery`)
 - **W3 — Context, Vision and Reasoning (Week 1 / Days 1–7):** Prathibhashree K (`feature/w3-context-schemas`)
 - **Target Team Branch:** `team/sde-6-voicebot`
 
@@ -19,9 +19,10 @@ All team work is organized by workstream within `projects/sde-6-voicebot/` follo
 +---------------------------------------------------------------------------------+
 |                        W1 AUDIO PIPELINE ARCHITECTURE                           |
 |                                                                                 |
-|  [MockAudioDeviceAdapter]                                                       |
+|  [MockAudioDeviceAdapter] <──── [DeviceRecoveryManager]                         |
 |   - Permission validation: GRANTED, DENIED, PROMPT                              |
 |   - AudioFormat negotiation (8kHz - 48kHz, mono/stereo)                         |
+|   - Automatic reconnect with exponential backoff on device loss                 |
 |           │                                                                     |
 |           ▼                                                                     |
 |  [MockMicrophoneSource] ---> [DeterministicAudioChunker]                        |
@@ -32,7 +33,7 @@ All team work is organized by workstream within `projects/sde-6-voicebot/` follo
 |  [AudioLifecycleController]                                                     |
 |   - States: CREATED -> RECORDING <-> PAUSED -> STOPPED                          |
 |   - Rejects illegal state transitions with AudioError                           |
-|   - Flushes/releases buffer on stop hook                                        |
+|   - Clean cancellation releasing buffer memory                                  |
 |           │                                                                     |
 |           ▼                                                                     |
 |  [VoiceActivityDetector (EnergyVAD)]                                            |
@@ -43,11 +44,18 @@ All team work is organized by workstream within `projects/sde-6-voicebot/` follo
 |           ▼                                                                     |
 |  [BoundedAudioBuffer]                                                           |
 |   - Bounded capacity with backpressure policies (DROP_OLDEST, DROP_NEWEST)      |
-|   - Dropped-chunk telemetry counter                                             |
-|   - Gap and late-arrival detection                                              |
+|   - Dropped-chunk telemetry counter & gap/late detection                        |
 |           │                                                                     |
 |           ▼                                                                     |
-|  [Downstream Consumers (W2: Speech-to-Text)]                                    |
+|  [AudioEventEmitter] ──> Emits EventEnvelope (session_id, correlation_id)       |
+|   - audio.speech_started, audio.speech_ended, audio.chunk_normalized             |
+|   - audio.device_lost, audio.device_reconnected, audio.cancelled                |
+|           │                                                                     |
+|           ▼                                                                     |
+|  [TranscriptionBridge]                                                          |
+|   - Sequence gap detection & silence suppression                                |
+|   - False-trigger noise spike rejection                                         |
+|   - Speech segment handoff to W2 Speech-to-Text module                          |
 +---------------------------------------------------------------------------------+
 ```
 
@@ -133,13 +141,16 @@ Defined once inside `projects/sde-6-voicebot/contracts/` in accordance with Sect
 
 ## Running Demonstrations & Test Suites
 
-### W1 & W2 Audio Pipeline Demonstrations:
+### W1 Audio Pipeline Demonstrations:
 ```bash
 # Week 1 CLI Stream Demo
 python projects/sde-6-voicebot/src/cli/audio_stream_demo.py --count 10
 
 # Week 2 Audio Pipeline & VAD Demo
 python projects/sde-6-voicebot/src/cli/audio_pipeline_demo.py
+
+# Week 3 Speech Events, Device Recovery & STT Bridge Demo
+python projects/sde-6-voicebot/src/cli/audio_week3_demo.py
 ```
 
 ### W3 Context & Reasoning Live Vertical Slice Demo:
@@ -149,7 +160,7 @@ python projects/sde-6-voicebot/demo/demo_grounded_response.py
 
 ### Running the Full Test Suite:
 ```bash
-python -m unittest discover -s projects/sde-6-voicebot/tests -v
+python -m pytest projects/sde-6-voicebot/tests -v
 ```
 
 ---
