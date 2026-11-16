@@ -1,12 +1,44 @@
+# Node dependencies and build
 node_modules/
 dist/
 coverage/
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+build/
+*.egg-info/
+
+# Environments & virtualenvs
 .env
 .env.*
-*.log
+*.secret
+*.pem
+*.key
+.venv
+env/
+venv/
+ENV/
+
+# Media artifacts & logs
 *.webm
 *.wav
 *.mp3
 *.png
 *.jpg
+*.log
+
+# Editor / OS / IDE files
+.vscode/
+.idea/
 .DS_Store
+Thumbs.db
+
+# Local push scripts
+push_to_team_repo.bat
+push_to_team_repo.ps1

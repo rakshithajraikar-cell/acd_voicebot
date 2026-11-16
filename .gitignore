@@ -6,6 +6,7 @@ coverage/
 # Environment and sensitive keys
 .env
 .env.*
+*.secret
 *.pem
 *.key
 
@@ -17,6 +18,16 @@ coverage/
 *.png
 *.jpg
 *.jpeg
+*.pdf
+
+# Python bytecode and caches
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Local push scripts
+push_to_team_repo.bat
+push_to_team_repo.ps1
 
 # Logs
 *.log

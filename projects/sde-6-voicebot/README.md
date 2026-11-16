@@ -1,22 +1,70 @@
-# Academiaai AI Voicebot — SDE 6 (W2: Speech-to-Text)
+# Academiaai AI Voicebot — Team SDE 6
 
-**Workstream**: W2 — Speech-to-Text  
-**Assigned Student**: Pavithra P (SDE 6, Member 2)  
-**Milestones Delivered**: 
-- **Week 1 (Days 1–7)**: Transcript Schemas, Fake Transcriber & Segment Accumulator
-- **Week 2 (Days 8–14)**: Orchestration, Ordering & De-duplication, Retries & Preprocessing
-- **Week 3 (Days 15–21)**: Revisions & Finalization, Mock Fallback & Event-Stream Integration  
-**Team Branch**: `team/sde-6-voicebot`  
-**Feature Branch**: `feature/w2-speech-to-text`  
-**Base Repository**: [https://github.com/Yashuudevang/acd_voicebot](https://github.com/Yashuudevang/acd_voicebot)
+Welcome to the team project repository for **Academiaai AI Voicebot — Team SDE 6**.
+All team work is organized by workstream within `projects/sde-6-voicebot/` following the shared Section 8 engineering standards.
 
 ---
 
-## 1. Overview & Architectural Boundaries
+## Team Workstreams & Active Feature Branches
 
-This module forms the foundation of the Speech-to-Text (STT) pipeline for SDE 6. It operates strictly in **Mock Mode by default**, requiring zero paid external API keys or credentials.
+- **W1 — Audio & Voice Activity Detection (Weeks 1 & 2):** Rakshitha J Raikar (`feature/w1-audio-schemas`, `feature/w2-audio-lifecycle-vad`)
+- **W2 — Speech-to-Text (Weeks 1, 2 & 3):** Pavithra P (`feature/w2-speech-to-text`)
+- **W3 — Context, Vision and Reasoning (Week 1 / Days 1–7):** Prathibhashree K (`feature/w3-context-schemas`)
+- **Target Team Branch:** `team/sde-6-voicebot`
+- **Base Repository:** [https://github.com/Yashuudevang/acd_voicebot](https://github.com/Yashuudevang/acd_voicebot)
 
-### Key Capabilities Delivered:
+---
+
+## 1. Workstream W1: Audio & VAD Architecture
+
+```
++---------------------------------------------------------------------------------+
+|                        W1 AUDIO PIPELINE ARCHITECTURE                           |
+|                                                                                 |
+|  [MockAudioDeviceAdapter]                                                       |
+|   - Permission validation: GRANTED, DENIED, PROMPT                              |
+|   - AudioFormat negotiation (8kHz - 48kHz, mono/stereo)                         |
+|           │                                                                     |
+|           ▼                                                                     |
+|  [MockMicrophoneSource] ---> [DeterministicAudioChunker]                        |
+|   - Deterministic sine waveform     - Monotonic sequence IDs                    |
+|   - Zero hardware dependency        - Accurate timestamps                       |
+|           │                                                                     |
+|           ▼                                                                     |
+|  [AudioLifecycleController]                                                     |
+|   - States: CREATED -> RECORDING <-> PAUSED -> STOPPED                          |
+|   - Rejects illegal state transitions with AudioError                           |
+|   - Flushes/releases buffer on stop hook                                        |
+|           │                                                                     |
+|           ▼                                                                     |
+|  [VoiceActivityDetector (EnergyVAD)]                                            |
+|   - Configurable energy threshold and minimum speech duration (noise filter)    |
+|   - Hangover duration smoothing                                                 |
+|   - Deterministic classification on fixtures                                    |
+|           │                                                                     |
+|           ▼                                                                     |
+|  [BoundedAudioBuffer]                                                           |
+|   - Bounded capacity with backpressure policies (DROP_OLDEST, DROP_NEWEST)      |
+|   - Dropped-chunk telemetry counter                                             |
+|   - Gap and late-arrival detection                                              |
+|           │                                                                     |
+|           ▼                                                                     |
+|  [Downstream Consumers (W2: Speech-to-Text)]                                    |
++---------------------------------------------------------------------------------+
+```
+
+---
+
+## 2. Workstream W2: Speech-to-Text Subsystem
+
+**Assigned Student**: Pavithra P (SDE 6, Member 2)  
+**Feature Branch**: `feature/w2-speech-to-text`  
+**Milestones Delivered**:
+- **Week 1 (Days 1–7)**: Transcript Schemas, Fake Transcriber & Segment Accumulator
+- **Week 2 (Days 8–14)**: Orchestration, Resampling, Normalization & Bounded Retries
+- **Week 3 (Days 15–21)**: Revisions & Finalization, Mock Fallback & Event-Stream Integration
+
+### Architectural Capabilities Delivered:
 
 #### Week 1 (Foundation & Schemas)
 1. **Contract Definition (`src/contracts/`)**:
@@ -66,10 +114,7 @@ This module forms the foundation of the Speech-to-Text (STT) pipeline for SDE 6.
    - `AudioEventGateway`: Sequence continuity tracking and missing-chunk gap detection.
    - `BackendEventStreamBridge`: Reconnect & replay buffer (`replayEvents(sessionId, afterEventId)`) ensuring zero event loss across UI/backend drops.
 
----
-
-## 2. Directory Structure
-
+### Directory Structure (W2 TypeScript Pipeline):
 ```
 projects/sde-6-voicebot/
 ├── README.md                      # Complete module documentation & PR evidence
@@ -128,34 +173,7 @@ projects/sde-6-voicebot/
         └── audio-gateway.test.ts             # 3 tests: W1 chunk routing, sequence gap detection, W5 event replay
 ```
 
----
-
-## 3. How to Run
-
-### Install Dependencies
-```powershell
-cd projects/sde-6-voicebot
-npm install
-```
-
-### Typecheck (Zero Errors)
-```powershell
-npm run typecheck
-```
-
-### Run All 53 Tests
-```powershell
-npm run test
-```
-
-### Run Live Demos
-- **Week 1**: `npm run demo`
-- **Week 2**: `npm run demo:week2`
-- **Week 3**: `npm run demo:week3`
-
----
-
-## 4. Acceptance Checklist
+### Acceptance Checklist (W2):
 
 | # | Acceptance Criteria | Status | Evidence / Location |
 |---|---|:---:|---|
@@ -171,18 +189,104 @@ npm run test
 
 ---
 
-## 5. Daily Progress Report (Week 3: Days 15–21)
+## 3. Workstream W3: Context and Reasoning Layer Architecture
 
-- **Day 15–16 (Revisions & Confidence Thresholds)**:
-  - Added support for `transcript.revised` events to update transcript segments in-place.
-  - Implemented confidence threshold filtering and uncertainty marking (`[uncertain: ...]`).
-  - Enforced strict session isolation rejecting foreign session IDs with `SESSION_MISMATCH`.
-- **Day 17–18 (Mock Fallback & Cancellation)**:
-  - Created `FallbackSpeechToTextAdapter` with automated failover on HTTP 429 quota exhaustion and network disconnects.
-  - Implemented cooperative cancellation propagating through primary and fallback providers.
-- **Day 19–20 (W1 Audio Gateway & W5 Backend Stream Integration)**:
-  - Created `AudioEventGateway` with sequence continuity tracking and missing-chunk gap detection.
-  - Created `BackendEventStreamBridge` with chronological event caching and replay/reconnection capabilities.
-- **Day 21 (Integration Demo & Gate Approval)**:
-  - Added 11 new integration tests (total 53 tests passing).
-  - Built and verified `src/demo/week3-integration-demo.ts` live CLI demonstration.
+This subsystem provides the typed schemas, privacy-preserving synthetic frame generation, versioned prompt management, deterministic mock reasoning, and strict validation engine.
+
+Everything operates completely in **mock mode** with **zero paid API keys, zero external network calls, zero disk writes for frames, and zero real personal data**.
+
+### Component Architecture (W3 Python Pipeline)
+```
+projects/sde-6-voicebot/
+├── contracts/                        # Single source of truth for schemas & envelopes
+│   ├── envelope.py                   # EventEnvelope, ErrorEnvelope, SessionState, WorkflowState
+│   ├── context.py                    # ScreenContext, ContextItem, SourceReference, BoundingBox
+│   └── reasoning.py                  # ReasoningRequest, ReasoningResult, ConfidenceLevel, ProviderStatus
+├── src/voicebot/
+│   ├── context/                      # Screen context capture & synthetic frame engine
+│   │   ├── capture_adapter.py        # Privacy gatekeeper (Screen capture OFF by default, opt-in/opt-out)
+│   │   └── synthetic_frames.py       # In-memory synthetic fixtures (Grades, Schedule, Library)
+│   ├── prompts/                      # Prompt engineering & security quarantine
+│   │   └── prompt_manager.py         # Versioned prompts (v1.0.0, v1.1.0) separating trusted/untrusted
+│   ├── reasoning/                    # Deterministic mock reasoning engine
+│   │   └── mock_reasoner.py          # Grounded reasoning, SourceReference citations, uncertainty surfacing
+│   └── validation/                   # Schema validation & error reporting
+│       └── validators.py             # Rejection of invalid inputs, format_error_envelope
+├── tests/                            # Comprehensive Unit Tests covering normal, boundary & edge cases
+│   ├── test_schemas.py
+│   ├── test_synthetic_frames.py
+│   ├── test_prompts.py
+│   ├── test_mock_reasoning.py
+│   └── test_validation.py
+├── demo/                             # Day 7 Live Vertical Slice Demonstration
+│   └── demo_grounded_response.py
+└── README.md                         # Complete documentation & field specifications
+```
+
+---
+
+## 4. How to Run & Verify
+
+### Workstream W2 (Speech-to-Text - TypeScript):
+
+```powershell
+cd projects/sde-6-voicebot
+
+# Install dependencies
+npm install
+
+# Typecheck (0 errors)
+npm run typecheck
+
+# Run Vitest test suite (53/53 tests pass)
+npm run test
+
+# Run Live Demos
+npm run demo          # Week 1 Live Demo
+npm run demo:week2    # Week 2 Orchestrator Demo
+npm run demo:week3    # Week 3 Integration Demo
+```
+
+### Workstream W1 & W3 (Audio & Reasoning - Python):
+
+```powershell
+# Week 1 CLI Stream Demo
+python projects/sde-6-voicebot/src/cli/audio_stream_demo.py --count 10
+
+# Week 2 Audio Pipeline & VAD Demo
+python projects/sde-6-voicebot/src/cli/audio_pipeline_demo.py
+
+# W3 Context & Reasoning Live Vertical Slice Demo
+python projects/sde-6-voicebot/demo/demo_grounded_response.py
+
+# Run Python Unit Tests
+python -m unittest discover -s projects/sde-6-voicebot/tests -v
+```
+
+---
+
+## 5. Daily Progress Reports
+
+### Workstream W2 (Speech-to-Text — Pavithra P)
+- **Week 1 (Days 1–7: Schemas & Mock Transcriber)**:
+  - Day 1–2: Defined typed Zod schemas (`TranscriptSegment`, `TranscriptEvent`, `EventEnvelope`, `ErrorEnvelope`) with immutability and runtime validation.
+  - Day 3–4: Implemented `DeterministicFakeTranscriber` emitting predictable interim and final segments across deterministic mock waveforms.
+  - Day 5–6: Built `SegmentAccumulator` managing monotonic ordering, duplicate rejection, and interim-to-final replacement.
+  - Day 7: Created Week 1 CLI demo and verification suite.
+- **Week 2 (Days 8–14: Orchestration & Resilience)**:
+  - Day 8–9: Implemented `AudioPreprocessor` supporting 8kHz/44.1kHz/48kHz to 16kHz resampling, peak amplitude normalization, DC offset removal, and stereo-to-mono downmixing.
+  - Day 10–11: Implemented `RetryHandler` with bounded retries, exponential backoff, deadline timeouts, and user-safe error normalization.
+  - Day 12–13: Implemented `TranscriptionOrchestrator` linking audio ingestion, preprocessing, retries, mock transcription, and accumulator with duplicate suppression and metrics.
+  - Day 14: Created Week 2 CLI demo and test suite (total 42 tests passing).
+- **Week 3 (Days 15–21: Revisions, Fallback & Event Streams)**:
+  - Day 15–16: Added `transcript.revised` in-place segment revisions, confidence thresholding (`0.70`), and strict session isolation.
+  - Day 17–18: Implemented `FallbackSpeechToTextAdapter` with automated fallback on quota exhaustion (HTTP 429) or network drop, and cooperative cancellation.
+  - Day 19–20: Connected `AudioEventGateway` (W1 event routing & missing-chunk gap detection) and `BackendEventStreamBridge` (W5 backend event transport with reconnect buffer and replay).
+  - Day 21: Added 11 integration tests (total 53 tests passing), created Week 3 live integration demo, and updated team integration evidence.
+
+### Workstream W3 (Context & Reasoning — Prathibhashree K)
+- **Week 1 (Days 1–7)**:
+  - Day 1–2: Defined typed schemas (`ScreenContext`, `ContextItem`, `SourceReference`, `ReasoningRequest`, `ReasoningResult`, `EventEnvelope`, `ErrorEnvelope`).
+  - Day 3–4: Implemented `ScreenCaptureAdapter`, `SyntheticFrameGenerator`, `PromptManager`, and `MockReasoningEngine`.
+  - Day 5–6: Built `validators.py` and unit test suite with 30 tests. 100% pass rate.
+  - Day 7: Created live demo script `demo_grounded_response.py` and opened PR #4.
