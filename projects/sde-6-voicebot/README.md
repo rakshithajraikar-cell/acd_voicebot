@@ -5,15 +5,21 @@ All team work is organized by workstream within `projects/sde-6-voicebot/` follo
 
 ---
 
-## Team Workstreams & Active Feature Branches
+## 1. Team & Workstream Structure
 
-- **W1 — Audio & Voice Activity Detection (Weeks 1 & 2):** Rakshitha J Raikar (`feature/w1-audio-schemas`, `feature/w2-audio-lifecycle-vad`)
-- **W3 — Context, Vision and Reasoning (Week 1 / Days 1–7):** Prathibhashree K (`feature/w3-context-schemas`)
-- **Target Team Branch:** `team/sde-6-voicebot`
+- **Repository:** `https://github.com/Yashuudevang/acd_voicebot`
+- **Target Branch:** `team/sde-6-voicebot` (or `develop`)
+- **Workstreams:**
+  - **W1 — Audio & Voice Activity Detection:** Rakshitha J Raikar (`feature/w1-audio-schemas`, `feature/w2-audio-lifecycle-vad`)
+  - **W2 — Speech-to-Text:** Pavithra P
+  - **W3 — Context, Vision & Reasoning:** Prathibhashree K (`feature/w3-context-schemas`)
+  - **W4 — Agentic Workflow Engine:** Spoorthi Y D (`feature/w4-agentic-workflow`)
+  - **W5 — Backend, Sessions & Observability:** Radhika B
+  - **W6 — Frontend & User Experience:** Shivani Adaragunchi
 
 ---
 
-## Workstream W1: Audio & VAD Architecture
+## 2. Workstream W1: Audio & VAD Architecture
 
 ```
 +---------------------------------------------------------------------------------+
@@ -53,109 +59,141 @@ All team work is organized by workstream within `projects/sde-6-voicebot/` follo
 
 ---
 
-## Workstream W3: Context and Reasoning Layer Architecture
+## 3. Workstream W3: Context and Reasoning Layer Architecture
 
-This subsystem provides the typed schemas, privacy-preserving synthetic frame generation, versioned prompt management, deterministic mock reasoning, and strict validation engine.
+This subsystem provides typed schemas, privacy-preserving synthetic frame generation, versioned prompt management, deterministic mock reasoning, and a strict validation engine.
+Everything operates completely in **mock mode** with zero paid API keys, zero external network calls, zero disk writes for frames, and zero real personal data.
 
-Everything operates completely in **mock mode** with **zero paid API keys, zero external network calls, zero disk writes for frames, and zero real personal data**.
-
-### Component Architecture
-```
-projects/sde-6-voicebot/
-├── contracts/                        # Single source of truth for schemas & envelopes
-│   ├── envelope.py                   # EventEnvelope, ErrorEnvelope, SessionState, WorkflowState
-│   ├── context.py                    # ScreenContext, ContextItem, SourceReference, BoundingBox
-│   └── reasoning.py                  # ReasoningRequest, ReasoningResult, ConfidenceLevel, ProviderStatus
-├── src/voicebot/
-│   ├── context/                      # Screen context capture & synthetic frame engine
-│   │   ├── capture_adapter.py        # Privacy gatekeeper (Screen capture OFF by default, opt-in/opt-out)
-│   │   └── synthetic_frames.py       # In-memory synthetic fixtures (Grades, Schedule, Library)
-│   ├── prompts/                      # Prompt engineering & security quarantine
-│   │   └── prompt_manager.py         # Versioned prompts (v1.0.0, v1.1.0) separating trusted/untrusted
-│   ├── reasoning/                    # Deterministic mock reasoning engine
-│   │   └── mock_reasoner.py          # Grounded reasoning, SourceReference citations, uncertainty surfacing
-│   └── validation/                   # Schema validation & error reporting
-│       └── validators.py             # Rejection of invalid inputs, format_error_envelope
-├── tests/                            # Comprehensive Unit Tests covering normal, boundary & edge cases
-│   ├── test_schemas.py
-│   ├── test_synthetic_frames.py
-│   ├── test_prompts.py
-│   ├── test_mock_reasoning.py
-│   └── test_validation.py
-├── demo/                             # Day 7 Live Vertical Slice Demonstration
-│   └── demo_grounded_response.py
-└── README.md                         # Complete documentation & field specifications
-```
+### W3 Schemas (`contracts/context.py`, `contracts/reasoning.py`):
+- `ScreenContext`: Screen geometry, OCR text, bounding boxes, opt-in privacy consent.
+- `ContextItem`: Item type, source references, confidence ratio, TTL expiration.
+- `SourceReference`: Provenance citations (`synthetic://screen/frame_001`).
+- `ReasoningRequest` & `ReasoningResult`: Grounded responses, citations, confidence levels, uncertainty surfacing, and suggested actions.
 
 ---
 
-## Typed Schema Specifications (W3)
+## 4. Workstream W4: Agentic Workflow Engine (Weeks 1–3)
 
-Defined once inside `projects/sde-6-voicebot/contracts/` in accordance with Section 8 Engineering Standards:
+- **Assignee:** Spoorthi Y D
+- **Feature Branch:** `feature/w4-agentic-workflow`
+- **Base Branch:** `team/sde-6-voicebot`
 
-### ScreenContext (`contracts/context.py`)
-- `context_id`: UUID v4 string
-- `session_id`: Session UUID string
-- `timestamp`: ISO 8601 UTC string
-- `capture_enabled`: Boolean (**Default: False**)
-- `capture_allowed_by_user`: Boolean (**Default: False**, opt-in consent)
-- `window_title`: Optional synthetic window title
-- `application_name`: Optional synthetic application name
-- `screen_width`: Pixels (`> 0`, default 1920)
-- `screen_height`: Pixels (`> 0`, default 1080)
-- `ocr_text`: Extracted text from synthetic frame
-- `bounding_boxes`: List of UI `BoundingBox` elements
-- `is_synthetic`: Boolean (**Must be True**)
+### Architecture Overview
 
-### ContextItem (`contracts/context.py`)
-- `item_id`: UUID v4 string
-- `item_type`: `ContextItemType` enum (`screen_frame`, `ocr_text`, etc.)
-- `content`: Textual observation or extracted text
-- `source`: `SourceReference` citation object
-- `confidence`: Score ratio `[0.0 - 1.0]`
-- `created_at`: ISO 8601 UTC timestamp
-- `ttl_seconds`: Expiration seconds for stale context
-- `is_synthetic`: Boolean (**Must be True**)
+```
+                                  [ WorkflowPlan ]
+                                         │
+                                         ▼
+                                  [ PlanValidator ]
+                                   - Step ID uniqueness & non-blank
+                                   - Referential integrity of depends_on
+                                   - Kahn's DAG cycle detection
+                                   - Tool allow-list & parameter schema
+                                   - Permission scope authorization
+                                         │
+                                         ▼
+                              [ WorkflowStateMachine ]
+          draft ───► awaiting_approval ───► running ───► succeeded
+            │                │                 │             (terminal)
+            │                │                 ├───► failed (terminal)
+            └────────────────┴─────────────────┴───► cancelled (terminal)
+                                         │
+                                         ▼
+                              [ WorkflowExecutor ]
+             ┌───────────────────────────┴───────────────────────────┐
+             ▼                                                       ▼
+   [ Harmless / Approved Step ]                             [ Consequential Step ]
+             │                                                       │
+             ▼                                                       ▼
+   [ ToolRegistry Allow-list ]                             [ Approval Gate & TTL ]
+    - format_notes (safe, idempotent)                       - PENDING -> APPROVED
+    - schedule_reminder (consequential)                     - REJECTED -> guarantees NO execution
+    - Permission scope check                                - EXPIRED  -> guarantees NO execution
+             │                                                       │
+             ▼                                                       ▼
+   [ Execution Engine ]                                     [ Safe Cancellation ]
+    - Timeouts (step_timeout_seconds)                        - Downstream steps cancelled
+    - Bounded retries (idempotent calls ONLY)                - Immutable audit events
+    - Cancellation handling                                  - Tool NEVER executed
+    - Checkpoint & resume on failure                         - Idempotency store cache
+```
 
-### SourceReference (`contracts/context.py`)
-- `source_id`: Unique citation identifier string
-- `source_type`: `SourceType` enum (`synthetic_screen`, `mock_document`, etc.)
-- `uri`: Synthetic resource locator (e.g. `synthetic://screen/frame_001`)
-- `title`: Human-readable source title
-- `snippet`: Extracted excerpt supporting the claim
-- `timestamp`: ISO 8601 UTC date
+### Key Modules & Deliverables (W4)
 
-### ReasoningRequest & ReasoningResult (`contracts/reasoning.py`)
-- `ReasoningRequest`: `request_id`, `session_id`, `correlation_id`, `user_query`, `context_items`, `prompt_version`, `temperature=0.0`, `max_tokens=1024`, `mock_mode=True`.
-- `ReasoningResult`: `result_id`, `request_id`, `session_id`, `correlation_id`, `response_text`, `sources_used`, `confidence`, `confidence_level`, `has_sufficient_evidence`, `uncertainty_reason`, `suggested_action`, `execution_time_ms`, `is_mock=True`.
+All W4 code is self-contained within `projects/sde-6-voicebot/src/sde6_voicebot/`:
+
+1. **Contracts (`contracts/common.py`, `contracts/workflow.py`)**:
+   - `WorkflowPlan`: Strongly typed plan model with Kahn's DAG cycle detection and dependency referential integrity.
+   - `WorkflowStep`: Step specification with `timeout_seconds`, `max_retries`, `retry_count`, `is_idempotent`, and optional `idempotency_key`.
+   - `ToolSpec`: Specification declaring `is_consequential`, `is_idempotent`, and required `permission_scope`.
+   - `ApprovalRequest`: Human approval request schema with `expires_at`, `ttl_seconds`, and `is_expired()` evaluation.
+   - `WorkflowResult`: Immutable execution outcome with `completed_steps`, `step_results`, `audit_events`, and redacted error envelope.
+   - `EventEnvelope` & `ErrorEnvelope`: Standardized envelopes for audit tracing and safe error exposure.
+
+2. **Plan Validation (`workflow/validator.py`)**:
+   - `PlanValidator`: Validates structural integrity, dependency graphs, cycle detection via Kahn's algorithm with explicit cycle path reporting, tool allow-list validation, argument validation against parameter schemas, and permission scope authorization.
+
+3. **Tool Registry & Permission Scopes (`workflow/tools.py`)**:
+   - Strict allow-list containing **only harmless mock tools**:
+     - `format_notes`: Safe in-memory text structuring (`is_consequential=False`, `is_idempotent=True`, scope: `safe.memory.read_write`).
+     - `schedule_reminder`: Safe in-memory synthetic reminder (`is_consequential=True`, `is_idempotent=False`, scope: `user.notification.schedule`).
+   - `ToolRegistry.validate_arguments()`: Validates types, required fields, and boundary constraints.
+   - `ToolRegistry.enforce_permission()`: Rejects unauthorized callers lacking the required permission scope with `PermissionScopeError`.
+
+4. **Approval Logic & Guarantees (`workflow/executor.py`)**:
+   - Gating: Consequential actions default to `awaiting_approval` and halt execution until explicit human decision.
+   - **Rejection Guarantee:** Rejecting an approval strictly guarantees the tool is NEVER executed (`tool_executed: False`), marks the step as cancelled, cancels downstream steps, transitions workflow to `CANCELLED`, and emits a safe audit event.
+   - **Expiry Guarantee:** Expiration of an approval request (via TTL) guarantees the tool is NEVER executed, rejects late approval attempts with `ApprovalExpiredError`, cancels downstream steps, and records a safe audit event.
+
+5. **Safe Executor Engine (`workflow/executor.py`)**:
+   - **Timeouts:** Enforces execution timeouts (`timeout_seconds`), catching hanging or slow operations with `WorkflowTimeoutError` and emitting `workflow.step_timeout`.
+   - **Bounded Retries:** Restricts retries strictly to **idempotent** calls (`is_idempotent=True`), retrying up to `max_retries`. Non-idempotent calls are strictly blocked from retrying to prevent duplicate side effects.
+   - **Cancellation:** Supports immediate cancellation via `cancel_workflow(reason)` across all non-terminal states, halting steps and releasing pending approvals.
+   - **Checkpoint & Resume:** Supports persisting state snapshots and resuming paused or recovered workflows without re-running completed steps.
 
 ---
 
-## Running Demonstrations & Test Suites
+## 5. Demonstrations
 
-### W1 & W2 Audio Pipeline Demonstrations:
+### Week 2 & Week 3 Agentic Workflow Demo:
+```bash
+python projects/sde-6-voicebot/src/sde6_voicebot/demo.py
+```
+
+### Audio Stream Demonstrations:
 ```bash
 # Week 1 CLI Stream Demo
 python projects/sde-6-voicebot/src/cli/audio_stream_demo.py --count 10
 
-# Week 2 Audio Pipeline & VAD Demo
+# Week 2 Pipeline & VAD Demo
 python projects/sde-6-voicebot/src/cli/audio_pipeline_demo.py
 ```
 
-### W3 Context & Reasoning Live Vertical Slice Demo:
+### Context & Reasoning Vertical Slice Demo:
 ```bash
 python projects/sde-6-voicebot/demo/demo_grounded_response.py
 ```
 
-### Running the Full Test Suite:
+---
+
+## 6. Test Suite Execution
+
+Run all automated unit, contract, and policy tests:
 ```bash
-python -m unittest discover -s projects/sde-6-voicebot/tests -v
+python -m pytest projects/sde-6-voicebot/tests/ -v
 ```
 
 ---
 
-## Daily Progress Report Summary (Week 1 / Days 1–7)
-- **Day 1–2**: Defined typed schemas (`ScreenContext`, `ContextItem`, `SourceReference`, `ReasoningRequest`, `ReasoningResult`, `EventEnvelope`, `ErrorEnvelope`) with full field documentation, units, constraints, and immutability.
-- **Day 3–4**: Implemented `ScreenCaptureAdapter` (OFF by default, opt-in/opt-out), `SyntheticFrameGenerator` (four fixtures: grades, schedule, loans, blank), `PromptManager` (versioned v1.0.0 and v1.1.0 with strict isolation and injection defense), and deterministic `MockReasoningEngine`.
-- **Day 5–6**: Built comprehensive `validators.py` and unit test suite with 30 tests covering valid, boundary, invalid, and edge cases. 100% pass rate.
-- **Day 7**: Created Day 7 live demo script `demo_grounded_response.py`, verified all acceptance criteria, and opened PR #4 into `team/sde-6-voicebot`.
+## 7. Acceptance Criteria Checklist (W4 Agentic Workflow)
+
+- [x] **Cycle and dependency validation:** Plans with cycles or missing dependencies are rejected with clear errors identifying the offending steps.
+- [x] **Tool allow-list & argument validation:** Unknown tools raise `ToolSecurityError`; invalid arguments raise `ToolArgumentError`.
+- [x] **Permission scopes enforcement:** Caller lacking the tool's required permission scope is rejected with `PermissionScopeError`.
+- [x] **Approval rejection guarantee:** A rejected approval guarantees no tool execution (`step.result is None`), cancels downstream steps, and records a safe audit event with `tool_executed: False`.
+- [x] **Approval expiry guarantee:** An expired approval guarantees no tool execution, rejects late approval attempts, cancels downstream steps, and records a safe audit event.
+- [x] **Executor timeouts:** Step timeouts are enforced via `timeout_seconds`, safely terminating hanging operations.
+- [x] **Bounded retries for idempotent calls:** Retries are bounded by `max_retries` and strictly permitted only for idempotent calls. Non-idempotent calls are never retried.
+- [x] **Workflow cancellation:** Cleanly halts execution, transitions state machine to `CANCELLED`, and emits `workflow.cancelled`.
+- [x] **Mock mode purity:** Only harmless mock tools exist (`format_notes`, `schedule_reminder`); no external sending, network requests, or computer control.
+- [x] **No duplicate schemas:** Reuses schemas defined once in contracts.
