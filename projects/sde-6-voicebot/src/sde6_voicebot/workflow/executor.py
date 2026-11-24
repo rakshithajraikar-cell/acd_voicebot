@@ -14,7 +14,7 @@ Enforces:
 import concurrent.futures
 from datetime import datetime, timedelta, timezone
 import time
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set, Union
 from uuid import uuid4
 
 from sde6_voicebot.contracts.common import EventEnvelope, ErrorEnvelope, WorkflowState
@@ -22,12 +22,15 @@ from sde6_voicebot.contracts.workflow import (
     ApprovalRequest,
     ApprovalStatus,
     StepStatus,
+    WorkflowCheckpoint,
     WorkflowPlan,
+    WorkflowProposal,
     WorkflowResult,
     WorkflowStep,
 )
 from sde6_voicebot.workflow.exceptions import (
     ApprovalExpiredError,
+    DuplicateApprovalError,
     InvalidPlanError,
     PermissionScopeError,
     ToolArgumentError,
@@ -50,16 +53,34 @@ class WorkflowExecutor:
         granted_scopes: Optional[Set[str]] = None,
         default_step_timeout_seconds: float = 30.0,
         default_approval_ttl_seconds: float = 300.0,
+        on_progress: Optional[Callable[[Dict[str, Any]], None]] = None,
     ):
         self.tool_registry = tool_registry or ToolRegistry(granted_scopes=granted_scopes)
         self.granted_scopes: Optional[Set[str]] = granted_scopes
         self.default_step_timeout_seconds = default_step_timeout_seconds
         self.default_approval_ttl_seconds = default_approval_ttl_seconds
+        self.on_progress = on_progress
         self.audit_events: List[EventEnvelope] = []
         self._pending_approvals: Dict[str, ApprovalRequest] = {}
+        self._decided_approvals: Dict[str, ApprovalRequest] = {}
+        self._checkpoints: Dict[str, WorkflowCheckpoint] = {}
+        self._checkpoint_history: List[WorkflowCheckpoint] = []
+        self._idempotency_store: Dict[str, Any] = {}
         self._active_plan: Optional[WorkflowPlan] = None
         self._state_machine: Optional[WorkflowStateMachine] = None
         self._start_time: float = 0.0
+
+    @property
+    def checkpoints(self) -> Dict[str, WorkflowCheckpoint]:
+        return dict(self._checkpoints)
+
+    @property
+    def idempotency_store(self) -> Dict[str, Any]:
+        return dict(self._idempotency_store)
+
+    @property
+    def decided_approvals(self) -> Dict[str, ApprovalRequest]:
+        return dict(self._decided_approvals)
 
     @property
     def state_machine(self) -> Optional[WorkflowStateMachine]:
@@ -108,6 +129,189 @@ class WorkflowExecutor:
             enforce_arguments=enforce_arguments,
         )
 
+    def _emit_progress(self, current_step_id: Optional[str] = None) -> Optional[EventEnvelope]:
+        """Compute and emit workflow.progress event, and call on_progress hook if registered."""
+        if not self._active_plan:
+            return None
+
+        total = len(self._active_plan.steps)
+        completed = len([s for s in self._active_plan.steps if s.status == StepStatus.SUCCEEDED])
+        failed = len([s for s in self._active_plan.steps if s.status in (StepStatus.FAILED, StepStatus.CANCELLED)])
+        percent = round((completed / total) * 100.0, 1) if total > 0 else 0.0
+
+        progress_data = {
+            "plan_id": self._active_plan.plan_id,
+            "total_steps": total,
+            "completed_steps": completed,
+            "failed_steps": failed,
+            "percent_complete": percent,
+            "current_step_id": current_step_id,
+            "state": self.current_state.value if self.current_state else "unknown",
+        }
+
+        event = self._emit_event(
+            event_type="workflow.progress",
+            session_id=self._active_plan.session_id,
+            correlation_id=self._active_plan.correlation_id,
+            payload=progress_data,
+        )
+
+        if self.on_progress:
+            try:
+                self.on_progress(progress_data)
+            except Exception:
+                pass
+
+        return event
+
+    def save_checkpoint(self, metadata: Optional[Dict[str, Any]] = None) -> WorkflowCheckpoint:
+        """Create and persist an immutable state snapshot of the active workflow.
+        
+        Guarantees:
+        - Captures completed step results, step execution states, and idempotency store.
+        - Enables resuming workflow after failures without re-running finished steps.
+        """
+        if not self._active_plan or not self._state_machine:
+            raise InvalidPlanError("Cannot checkpoint without an active workflow plan")
+
+        completed_steps = [s.step_id for s in self._active_plan.steps if s.status == StepStatus.SUCCEEDED]
+        failed_steps = [s.step_id for s in self._active_plan.steps if s.status in (StepStatus.FAILED, StepStatus.CANCELLED)]
+        step_results = {s.step_id: s.result for s in self._active_plan.steps if s.result is not None}
+        step_states = {s.step_id: s.status for s in self._active_plan.steps}
+
+        checkpoint = WorkflowCheckpoint(
+            checkpoint_id=str(uuid4()),
+            plan_id=self._active_plan.plan_id,
+            session_id=self._active_plan.session_id,
+            correlation_id=self._active_plan.correlation_id,
+            state=self._state_machine.current_state,
+            step_states=step_states,
+            step_results=step_results,
+            completed_steps=completed_steps,
+            failed_steps=failed_steps,
+            idempotency_store=dict(self._idempotency_store),
+            created_at=datetime.now(timezone.utc),
+            metadata=metadata or {},
+        )
+
+        self._checkpoints[checkpoint.checkpoint_id] = checkpoint
+        self._checkpoint_history.append(checkpoint)
+
+        self._emit_event(
+            event_type="workflow.checkpoint_saved",
+            session_id=self._active_plan.session_id,
+            correlation_id=self._active_plan.correlation_id,
+            payload={
+                "checkpoint_id": checkpoint.checkpoint_id,
+                "plan_id": checkpoint.plan_id,
+                "state": checkpoint.state.value,
+                "completed_count": len(completed_steps),
+                "total_steps": len(self._active_plan.steps),
+            },
+        )
+        return checkpoint
+
+    def restore_from_checkpoint(
+        self,
+        checkpoint: Union[WorkflowCheckpoint, str],
+        plan: Optional[WorkflowPlan] = None,
+        recover_failed: bool = True,
+    ) -> WorkflowPlan:
+        """Restore workflow state from a checkpoint.
+        
+        Guarantees:
+        - Completed steps retain their results and are NEVER re-executed upon resume.
+        - If recover_failed is True, failed steps are reset to PENDING for clean re-attempt.
+        - Restores idempotency cache.
+        """
+        if isinstance(checkpoint, str):
+            if checkpoint not in self._checkpoints:
+                raise InvalidPlanError(f"Checkpoint ID '{checkpoint}' not found in checkpoint store")
+            cp = self._checkpoints[checkpoint]
+        else:
+            cp = checkpoint
+
+        target_plan = plan or self._active_plan
+        if not target_plan:
+            raise InvalidPlanError("No target workflow plan provided for checkpoint restoration")
+
+        if target_plan.plan_id != cp.plan_id:
+            raise InvalidPlanError(
+                f"Checkpoint plan_id '{cp.plan_id}' does not match target plan '{target_plan.plan_id}'"
+            )
+
+        self._active_plan = target_plan
+        self._idempotency_store.update(cp.idempotency_store)
+
+        # Restore step results and states
+        for step in self._active_plan.steps:
+            if step.step_id in cp.step_results:
+                step.result = cp.step_results[step.step_id]
+
+            saved_status = cp.step_states.get(step.step_id, StepStatus.PENDING)
+            if saved_status == StepStatus.SUCCEEDED:
+                step.status = StepStatus.SUCCEEDED
+            elif saved_status in (StepStatus.FAILED, StepStatus.CANCELLED) and recover_failed:
+                step.status = StepStatus.PENDING
+                step.error = None
+                step.retry_count = 0
+            else:
+                step.status = saved_status
+
+        # Re-initialize state machine to active state
+        self._state_machine = WorkflowStateMachine(
+            initial_state=WorkflowState.RUNNING,
+            correlation_id=self._active_plan.correlation_id,
+        )
+        self._active_plan.state = WorkflowState.RUNNING
+
+        self._emit_event(
+            event_type="workflow.checkpoint_restored",
+            session_id=self._active_plan.session_id,
+            correlation_id=self._active_plan.correlation_id,
+            payload={
+                "checkpoint_id": cp.checkpoint_id,
+                "plan_id": cp.plan_id,
+                "completed_steps": cp.completed_steps,
+                "recovered_failed": recover_failed,
+            },
+        )
+        self._emit_progress()
+        return self._active_plan
+
+    def resume_workflow(
+        self,
+        checkpoint: Optional[Union[WorkflowCheckpoint, str]] = None,
+        recover_failed: bool = True,
+    ) -> Dict[str, Any]:
+        """Resume execution of a workflow from a checkpoint or current paused/failed state."""
+        if checkpoint is not None:
+            self.restore_from_checkpoint(checkpoint, recover_failed=recover_failed)
+        elif self._active_plan and recover_failed:
+            for step in self._active_plan.steps:
+                if step.status == StepStatus.FAILED:
+                    step.status = StepStatus.PENDING
+                    step.error = None
+                    step.retry_count = 0
+            if self._state_machine and self._state_machine.current_state in (WorkflowState.FAILED, WorkflowState.DRAFT):
+                self._state_machine = WorkflowStateMachine(
+                    initial_state=WorkflowState.RUNNING,
+                    correlation_id=self._active_plan.correlation_id,
+                )
+                self._active_plan.state = WorkflowState.RUNNING
+
+        if not self._active_plan:
+            raise InvalidPlanError("No active plan to resume")
+
+        self._emit_event(
+            event_type="workflow.resumed",
+            session_id=self._active_plan.session_id,
+            correlation_id=self._active_plan.correlation_id,
+            payload={"plan_id": self._active_plan.plan_id},
+        )
+        self._emit_progress()
+        return self._run_executable_steps()
+
     def start_workflow(self, plan: WorkflowPlan) -> Dict[str, Any]:
         """Validate, initialize, and begin executing a workflow plan.
         
@@ -151,9 +355,24 @@ class WorkflowExecutor:
         
         Safety guarantee:
         If the approval has expired, approval is rejected and tool is NEVER executed.
+        Duplicate approvals for the same request are strictly blocked.
         """
         if not self._active_plan or not self._state_machine:
             raise InvalidPlanError("No active workflow plan to approve")
+
+        if request_id in self._decided_approvals:
+            decided = self._decided_approvals[request_id]
+            if decided.status == ApprovalStatus.EXPIRED:
+                raise ApprovalExpiredError(
+                    f"Approval request '{request_id}' has expired and cannot be approved",
+                    request_id=request_id,
+                    correlation_id=self._active_plan.correlation_id,
+                )
+            raise DuplicateApprovalError(
+                f"Approval request '{request_id}' has already been decided",
+                request_id=request_id,
+                correlation_id=self._active_plan.correlation_id,
+            )
 
         if request_id not in self._pending_approvals:
             raise InvalidPlanError(f"Approval request '{request_id}' not found or already decided")
@@ -169,7 +388,7 @@ class WorkflowExecutor:
                 correlation_id=self._active_plan.correlation_id,
             )
 
-        # Remove from pending
+        # Remove from pending and track in decided
         self._pending_approvals.pop(request_id)
 
         updated_approval = ApprovalRequest(
@@ -187,6 +406,7 @@ class WorkflowExecutor:
             expires_at=approval.expires_at,
             ttl_seconds=approval.ttl_seconds,
         )
+        self._decided_approvals[request_id] = updated_approval
 
         self._emit_event(
             event_type="workflow.approval_granted",
@@ -225,9 +445,24 @@ class WorkflowExecutor:
         Safety guarantee:
         Rejection strictly guarantees the tool will NEVER be executed.
         Transitions workflow to CANCELLED and logs a safe audit event.
+        Duplicate decisions for the same request are strictly blocked.
         """
         if not self._active_plan or not self._state_machine:
             raise InvalidPlanError("No active workflow plan to reject")
+
+        if request_id in self._decided_approvals:
+            decided = self._decided_approvals[request_id]
+            if decided.status == ApprovalStatus.EXPIRED:
+                raise ApprovalExpiredError(
+                    f"Approval request '{request_id}' has expired and cannot be approved",
+                    request_id=request_id,
+                    correlation_id=self._active_plan.correlation_id,
+                )
+            raise DuplicateApprovalError(
+                f"Approval request '{request_id}' has already been decided",
+                request_id=request_id,
+                correlation_id=self._active_plan.correlation_id,
+            )
 
         if request_id not in self._pending_approvals:
             raise InvalidPlanError(f"Approval request '{request_id}' not found or already decided")
@@ -249,6 +484,7 @@ class WorkflowExecutor:
             expires_at=approval.expires_at,
             ttl_seconds=approval.ttl_seconds,
         )
+        self._decided_approvals[request_id] = updated_approval
 
         # Record safe audit event
         self._emit_event(
@@ -312,6 +548,7 @@ class WorkflowExecutor:
             expires_at=approval.expires_at,
             ttl_seconds=approval.ttl_seconds,
         )
+        self._decided_approvals[request_id] = updated_approval
 
         # Record safe audit event
         self._emit_event(
@@ -425,6 +662,8 @@ class WorkflowExecutor:
                 correlation_id=self._active_plan.correlation_id,
                 payload={"plan_id": self._active_plan.plan_id, "status": "succeeded"},
             )
+            self._emit_progress()
+            self.save_checkpoint(metadata={"trigger": "workflow_completed"})
             return {"status": "completed", "result": self._build_result()}
 
         return {"status": "in_progress", "state": self._state_machine.current_state.value}
@@ -474,6 +713,9 @@ class WorkflowExecutor:
             },
         )
 
+        self._emit_progress(current_step_id=step.step_id)
+        self.save_checkpoint(metadata={"trigger": "awaiting_approval", "step_id": step.step_id})
+
         return {
             "status": "awaiting_approval",
             "approval_request": approval_request,
@@ -518,6 +760,36 @@ class WorkflowExecutor:
         is_idempotent = step.is_idempotent if step.is_idempotent is not None else tool_spec.is_idempotent
         max_retries = step.max_retries if is_idempotent else 0
 
+        # Check idempotency cache: if already executed with this key, return cached result immediately
+        cache_key = None
+        if step.idempotency_key:
+            cache_key = f"{step.tool_name}:{step.idempotency_key}"
+            if cache_key in self._idempotency_store:
+                cached_output = self._idempotency_store[cache_key]
+                step.status = StepStatus.SUCCEEDED
+                step.result = cached_output
+
+                self._emit_event(
+                    event_type="workflow.idempotent_cache_hit",
+                    session_id=self._active_plan.session_id,
+                    correlation_id=self._active_plan.correlation_id,
+                    payload={
+                        "step_id": step.step_id,
+                        "tool_name": step.tool_name,
+                        "idempotency_key": step.idempotency_key,
+                        "cached": True,
+                    },
+                )
+                self._emit_event(
+                    event_type="workflow.step_completed",
+                    session_id=self._active_plan.session_id,
+                    correlation_id=self._active_plan.correlation_id,
+                    payload={"step_id": step.step_id, "tool_name": step.tool_name, "status": "succeeded", "cached": True},
+                )
+                self._emit_progress(current_step_id=step.step_id)
+                self.save_checkpoint(metadata={"trigger": "idempotent_cache_hit", "step_id": step.step_id})
+                return self._run_executable_steps()
+
         self._emit_event(
             event_type="workflow.step_started",
             session_id=self._active_plan.session_id,
@@ -525,6 +797,7 @@ class WorkflowExecutor:
             payload={
                 "step_id": step.step_id,
                 "tool_name": step.tool_name,
+                "idempotency_key": step.idempotency_key,
                 "is_idempotent": is_idempotent,
                 "timeout_seconds": timeout,
                 "max_retries": max_retries,
@@ -537,12 +810,17 @@ class WorkflowExecutor:
                 step.status = StepStatus.SUCCEEDED
                 step.result = output
 
+                if cache_key:
+                    self._idempotency_store[cache_key] = output
+
                 self._emit_event(
                     event_type="workflow.step_completed",
                     session_id=self._active_plan.session_id,
                     correlation_id=self._active_plan.correlation_id,
                     payload={"step_id": step.step_id, "tool_name": step.tool_name, "status": "succeeded"},
                 )
+                self._emit_progress(current_step_id=step.step_id)
+                self.save_checkpoint(metadata={"trigger": "step_succeeded", "step_id": step.step_id})
                 return self._run_executable_steps()
 
             except WorkflowTimeoutError as exc:
@@ -609,6 +887,11 @@ class WorkflowExecutor:
             correlation_id=self._active_plan.correlation_id,
             payload={"step_id": step.step_id, "tool_name": step.tool_name, "error": str(exc)},
         )
+        self._emit_progress(current_step_id=step.step_id)
+        self.save_checkpoint(metadata={"trigger": "step_failed", "step_id": step.step_id, "error": str(exc)})
+        self._emit_progress(current_step_id=step.step_id)
+        self.save_checkpoint(metadata={"trigger": "awaiting_approval", "step_id": step.step_id})
+
         return {"status": "failed", "result": self._build_result(error_msg=str(exc))}
 
     def _build_result(self, error_msg: Optional[str] = None) -> WorkflowResult:

@@ -98,6 +98,14 @@ class WorkflowTimeoutError(WorkflowEngineError):
         self.timeout_seconds = timeout_seconds
 
 
+class DuplicateApprovalError(WorkflowEngineError):
+    """Raised when an approval submission is received for an already decided request."""
+
+    def __init__(self, message: str, request_id: str = "unknown", correlation_id: str = "unknown"):
+        super().__init__(message, code="DUPLICATE_APPROVAL_SUBMISSION", correlation_id=correlation_id)
+        self.request_id = request_id
+
+
 class WorkflowCancelledError(WorkflowEngineError):
     """Raised when an operation is attempted on an already cancelled workflow."""
 

@@ -109,6 +109,7 @@ class WorkflowStep(BaseModel):
     retry_count: int = Field(default=0, description="Number of retries attempted")
     status: StepStatus = Field(default=StepStatus.PENDING, description="Step lifecycle status")
     approval_id: Optional[str] = Field(default=None, description="ID of approval request if gated")
+    idempotency_key: Optional[str] = Field(default=None, description="Client or step idempotency key to prevent duplicate execution")
     result: Optional[Any] = Field(default=None, description="Tool execution output if succeeded")
     error: Optional[str] = Field(default=None, description="Error message if failed")
 
@@ -205,3 +206,45 @@ class WorkflowResult(BaseModel):
     duration_seconds: float = Field(default=0.0, description="Total execution time in seconds")
     audit_events: List[EventEnvelope] = Field(default_factory=list, description="Immutable log of all audit events emitted")
     error: Optional[ErrorEnvelope] = Field(default=None, description="Populated if workflow terminated with error")
+
+
+class WorkflowCheckpoint(BaseModel):
+    """Snapshot of workflow execution state for recovery and resume.
+    
+    Guarantees:
+    - Failed-step recovery restores completed steps without re-running them.
+    - Captures step states, partial results, and idempotency cache.
+    """
+    model_config = ConfigDict(frozen=True)
+
+    checkpoint_id: str = Field(default_factory=lambda: str(uuid4()), description="Unique checkpoint ID")
+    plan_id: str = Field(..., description="Associated workflow plan ID")
+    session_id: str = Field(..., description="Associated session ID")
+    correlation_id: str = Field(..., description="Tracing correlation ID")
+    state: WorkflowState = Field(..., description="Workflow state when checkpoint was taken")
+    step_states: Dict[str, StepStatus] = Field(default_factory=dict, description="State snapshot for each step")
+    step_results: Dict[str, Any] = Field(default_factory=dict, description="Execution outputs of completed steps")
+    completed_steps: List[str] = Field(default_factory=list, description="IDs of completed steps")
+    failed_steps: List[str] = Field(default_factory=list, description="IDs of failed steps")
+    idempotency_store: Dict[str, Any] = Field(default_factory=dict, description="Cached idempotency outputs")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Timestamp of checkpoint")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Operational metadata or failure context")
+
+
+class WorkflowProposal(BaseModel):
+    """Proposal emitted from Reasoning (W3) to initiate a workflow.
+    
+    Bridges reasoning decisions into validated WorkflowPlan structures.
+    """
+    model_config = ConfigDict(frozen=True)
+
+    proposal_id: str = Field(default_factory=lambda: str(uuid4()), description="Unique proposal identifier")
+    session_id: str = Field(..., description="Originating session identifier")
+    correlation_id: str = Field(..., description="Correlation ID for end-to-end tracing")
+    intent: str = Field(..., description="Detected user intent or recommended workflow goal")
+    suggested_action: Optional[str] = Field(default=None, description="Action suggestion from reasoning engine")
+    steps: List[WorkflowStep] = Field(default_factory=list, description="Proposed workflow steps")
+    confidence: float = Field(default=1.0, description="Reasoning confidence score [0.0 - 1.0]")
+    sources_used: List[Dict[str, Any]] = Field(default_factory=list, description="Context citations backing this proposal")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), description="Timestamp proposal was formed")
+
