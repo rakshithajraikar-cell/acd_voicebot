@@ -1,0 +1,52 @@
+{
+  "description": "Recorded happy-path execution: Step 1 (format_notes) completes, Step 2 (schedule_reminder) approved by user",
+  "plan": {
+    "plan_id": "fixture-happy-path-001",
+    "session_id": "session-replay-happy",
+    "correlation_id": "corr-replay-happy",
+    "title": "Deterministic Lecture Notes & Reminder",
+    "description": "Happy path recorded run",
+    "steps": [
+      {
+        "step_id": "step-1-format",
+        "name": "Format Discussion Points",
+        "tool_name": "format_notes",
+        "arguments": {
+          "text": "Discussed distributed transactions, Kahn algorithm, and policy matrices."
+        },
+        "depends_on": [],
+        "is_consequential": false,
+        "is_idempotent": true,
+        "timeout_seconds": 30.0,
+        "idempotency_key": "fixture-format-001"
+      },
+      {
+        "step_id": "step-2-reminder",
+        "name": "Schedule Exam Review",
+        "tool_name": "schedule_reminder",
+        "arguments": {
+          "title": "Final Review Session",
+          "delay_minutes": 120,
+          "priority": "high"
+        },
+        "depends_on": ["step-1-format"],
+        "is_consequential": true,
+        "is_idempotent": false,
+        "timeout_seconds": 30.0,
+        "idempotency_key": "fixture-reminder-001"
+      }
+    ]
+  },
+  "decisions": [
+    {
+      "request_index": 0,
+      "decision": "approve",
+      "decided_by": "student_lead"
+    }
+  ],
+  "expected": {
+    "final_state": "succeeded",
+    "completed_steps": ["step-1-format", "step-2-reminder"],
+    "failed_steps": []
+  }
+}

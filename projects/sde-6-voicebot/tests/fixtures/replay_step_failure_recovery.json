@@ -1,0 +1,31 @@
+{
+  "description": "Recorded single harmless step execution with deterministic format outcome",
+  "plan": {
+    "plan_id": "fixture-single-step-003",
+    "session_id": "session-replay-single",
+    "correlation_id": "corr-replay-single",
+    "title": "Harmless In-Memory Formatting",
+    "description": "Deterministic formatting verification",
+    "steps": [
+      {
+        "step_id": "step-1-single",
+        "name": "Format Text Notes",
+        "tool_name": "format_notes",
+        "arguments": {
+          "text": "Antigravity voicebot test fixtures",
+          "bullet_style": "dash"
+        },
+        "depends_on": [],
+        "is_consequential": false,
+        "is_idempotent": true,
+        "timeout_seconds": 10.0
+      }
+    ]
+  },
+  "decisions": [],
+  "expected": {
+    "final_state": "succeeded",
+    "completed_steps": ["step-1-single"],
+    "failed_steps": []
+  }
+}
