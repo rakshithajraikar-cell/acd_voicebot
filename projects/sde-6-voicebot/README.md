@@ -8,7 +8,7 @@ All team work is organized by workstream within `projects/sde-6-voicebot/` follo
 ## Team Workstreams & Active Feature Branches
 
 - **W1 — Audio & Voice Activity Detection (Weeks 1 & 2):** Rakshitha J Raikar (`feature/w1-audio-schemas`, `feature/w2-audio-lifecycle-vad`)
-- **W3 — Context, Vision and Reasoning (Weeks 1, 2 & 3 / Days 1–21):** Prathibhashree K (`feature/w3-context-schemas`, `feature/w3-context-builder-llm-adapter`, `feature/w3-observations-workflow-handoff`)
+- **W3 — Context, Vision and Reasoning (Weeks 1, 2 & 3 / Days 1–21):** Prathibhashree K (`feature/w3-context-schemas`, `feature/w3-context-builder-llm-adapter`, `feature/w3-observations-workflow-handoff`, `feature/w3-golden-tests-privacy-latency`)
 - **Target Team Branch:** `team/sde-6-voicebot`
 
 ---
@@ -203,6 +203,9 @@ python projects/sde-6-voicebot/demo/demo_context_reasoning_week2.py
 
 # Week 3 Live Observations, Injection Defenses & Workflow Handoff Demonstration
 python projects/sde-6-voicebot/demo/demo_observations_workflow_handoff.py
+
+# Week 4 Final Release Hardening & Latency Demonstration (Day 30 Gate)
+python projects/sde-6-voicebot/demo/demo_release_hardening.py
 ```
 
 ### Running the Full Test Suite:
@@ -236,3 +239,10 @@ python -m unittest discover -s projects/sde-6-voicebot/tests -v
 - **Day 17–18**: Extended `MockReasoningEngine` to provide strictly grounded answers citing specific `SourceReference` citations for every factual claim. Engineered explicit honest 'no evidence' handling (`has_sufficient_evidence=False`, `ConfidenceLevel.UNKNOWN`) when context lacks supporting facts, preventing hallucinations.
 - **Day 19–20**: Upgraded `PromptManager` (v1.2.0) with comprehensive prompt injection detection across both user query and screen/OCR context. Built `WorkflowProposal` and `WorkflowStepProposal` contracts with risk classification and approval gates. Implemented `WorkflowHandoffClient` and `MockWorkflowReceiver` transmitting validated proposals via canonical `EventEnvelope` (`event_type="workflow.proposal_submitted"`).
 - **Day 21**: Built integration test suite (`test_week3_integration.py`) and live demo script (`demo_observations_workflow_handoff.py`). Total 82 W3 tests passing with 100% pass rate. Prepared Week 3 pull request to `team/sde-6-voicebot`.
+
+
+### Week 4 (Days 22–30): Hardening and Release Gate
+- **Day 22–24**: Engineered `data/golden_test_set.json` and `test_golden_dataset.py` locking reasoning behavior across 8 formal golden cases covering evidence grounding, SourceReference citations, honest 'no evidence' uncertainty, and prompt injection defense.
+- **Day 25–27**: Implemented automated PII and credential redactor (`TextRedactor`) masking emails, GitHub tokens, Bearer JWTs, and passwords before prompt injection or logging. Built consent revocation test (`test_consent_revocation.py`) proving stored context is immediately purged to 0 bytes. Built granular per-stage latency tracker (`LatencyTracker`, `LatencyReport`) recording capture, OCR, context ranking, prompt rendering, inference, and validation timings.
+- **Day 28–29**: Penned authoritative data-handling policy (`docs/DATA_HANDLING.md`) detailing capture boundaries, volatile RAM retention, and TTL eviction policies. Published prompt version governance registry (`docs/PROMPT_VERSIONS.md`) documenting versions 1.0.0, 1.1.0, and 1.2.0.
+- **Day 30**: Built Day 30 final release demonstration (`demo/demo_release_hardening.py`) verifying both normal path and all security failure scenarios. Expanded test suite to **91 tests** passing 100%. Prepared Day 30 release pull request to `team/sde-6-voicebot`.

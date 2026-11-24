@@ -28,6 +28,9 @@ from .context.observation_adapter import (
     ConsentRevokedError,
     StaleFrameError,
 )
+from .privacy.redactor import (
+    TextRedactor,
+)
 from .prompts.prompt_manager import (
     PromptManager,
     PromptVersion,
@@ -47,6 +50,10 @@ from .reasoning.llm_adapter import (
     LLMRetryExhaustedError,
     MalformedOutputError,
     UnsafeOutputError,
+)
+from .reasoning.latency import (
+    LatencyTracker,
+    LatencyReport,
 )
 from .workflow.handoff import (
     WorkflowHandoffClient,
@@ -85,7 +92,9 @@ __all__ = [
     "ObservationProducer",
     "ConsentRevokedError",
     "StaleFrameError",
-    # Prompts & Injection Defense (Week 3)
+    # Privacy & Redaction (Week 4)
+    "TextRedactor",
+    # Prompts & Injection Defense (Week 3/4)
     "PromptManager",
     "PromptVersion",
     "RenderedPrompt",
@@ -101,6 +110,9 @@ __all__ = [
     "LLMRetryExhaustedError",
     "MalformedOutputError",
     "UnsafeOutputError",
+    # Latency Instrumentation (Week 4)
+    "LatencyTracker",
+    "LatencyReport",
     # Workflow Handoff (Week 3)
     "WorkflowHandoffClient",
     "MockWorkflowReceiver",

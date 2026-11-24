@@ -29,6 +29,7 @@ if str(contracts_path) not in sys.path:
     sys.path.insert(0, str(contracts_path))
 
 from contracts.context import ContextItem
+from ..privacy.redactor import TextRedactor
 
 
 class PromptVersion(str, Enum):
@@ -235,16 +236,18 @@ class PromptManager:
         has_injection = query_injection or context_injection
         all_patterns = query_patterns + context_patterns
 
-        # Sanitize user query
-        safe_query = cls.sanitize_untrusted_text(user_query.strip())
+        # Sanitize and redact user query
+        redacted_query = TextRedactor.redact(user_query.strip())
+        safe_query = cls.sanitize_untrusted_text(redacted_query)
 
-        # Build context block with sanitized values
+        # Build context block with sanitized and redacted values
         context_lines = []
         if items:
             for idx, item in enumerate(items, 1):
-                safe_content = cls.sanitize_untrusted_text(item.content.strip())
+                redacted_content = TextRedactor.redact(item.content.strip())
+                safe_content = cls.sanitize_untrusted_text(redacted_content)
                 safe_uri = cls.sanitize_untrusted_text(item.source.uri or "unknown")
-                safe_title = cls.sanitize_untrusted_text(item.source.title or "untitled")
+                safe_title = cls.sanitize_untrusted_text(TextRedactor.redact(item.source.title or "untitled"))
                 context_lines.append(
                     f"  <context_item index=\"{idx}\" item_id=\"{item.item_id}\" source_id=\"{item.source.source_id}\">\n"
                     f"    <source_uri>{safe_uri}</source_uri>\n"

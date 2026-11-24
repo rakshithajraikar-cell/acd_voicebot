@@ -35,6 +35,7 @@ from contracts.context import (
     BoundingBox,
 )
 from .capture_adapter import ScreenCaptureAdapter, CaptureState
+from ..privacy.redactor import TextRedactor
 
 
 class ConsentRevokedError(Exception):
@@ -324,20 +325,23 @@ class ObservationProducer:
         self._last_frame_hash = frame_hash
         self._last_frame_time = current_time
 
-        # 4. GENERATE SOURCE-LINKED OBSERVATION
+        # 4. GENERATE SOURCE-LINKED OBSERVATION (WITH REDACTION)
+        raw_clean_text = TextRedactor.redact(frame.ocr_text or "")
+        clean_title = TextRedactor.redact(frame.window_title or "Synthetic Display Frame")
+        snippet_text = (raw_clean_text[:200] + "...") if len(raw_clean_text) > 200 else raw_clean_text
+
         source_ref = SourceReference(
             source_id=f"src_screen_{frame.context_id[:8]}",
             source_type=SourceType.SYNTHETIC_SCREEN,
             uri=f"synthetic://screen/{frame.session_id}/{frame.context_id}",
-            title=frame.window_title or "Synthetic Display Frame",
-            snippet=(frame.ocr_text[:200] + "...") if frame.ocr_text and len(frame.ocr_text) > 200 else frame.ocr_text,
+            title=clean_title,
+            snippet=snippet_text,
             timestamp=frame.timestamp,
         )
 
-        app_name = frame.application_name or "Unknown App"
-        win_title = frame.window_title or "Active Screen"
-        ocr_preview = (frame.ocr_text or "").strip().replace("\n", " | ")
-        summary = f"[{app_name}] {win_title}: {ocr_preview[:120]}"
+        app_name = TextRedactor.redact(frame.application_name or "Unknown App")
+        ocr_preview = raw_clean_text.strip().replace("\n", " | ")
+        summary = f"[{app_name}] {clean_title}: {ocr_preview[:120]}"
 
         observation = Observation(
             observation_id=str(uuid.uuid4()),
@@ -345,13 +349,13 @@ class ObservationProducer:
             timestamp=datetime.datetime.now(datetime.timezone.utc).isoformat(),
             source=source_ref,
             summary=summary,
-            raw_text=frame.ocr_text or "",
+            raw_text=raw_clean_text,
             confidence=1.0,
             bounding_boxes=list(frame.bounding_boxes),
             is_synthetic=True,
             metadata={
                 "application_name": app_name,
-                "window_title": win_title,
+                "window_title": clean_title,
                 "frame_context_id": frame.context_id,
                 "frame_hash": frame_hash,
             },

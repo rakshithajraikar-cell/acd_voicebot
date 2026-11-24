@@ -251,7 +251,7 @@ class MockReasoningEngine:
                     request_id=request.request_id,
                     session_id=request.session_id,
                     correlation_id=request.correlation_id,
-                    response_text="I cannot view your course schedule. Please open your University Calendar.",
+                    response_text="I do not have sufficient evidence to view your course schedule. Please open your University Calendar.",
                     sources_used=[],
                     confidence=0.15,
                     confidence_level=ConfidenceLevel.UNKNOWN,
