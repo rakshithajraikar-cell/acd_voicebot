@@ -8,7 +8,7 @@ All team work is organized by workstream within `projects/sde-6-voicebot/` follo
 ## Team Workstreams & Active Feature Branches
 
 - **W1 — Audio & Voice Activity Detection (Weeks 1 & 2):** Rakshitha J Raikar (`feature/w1-audio-schemas`, `feature/w2-audio-lifecycle-vad`)
-- **W3 — Context, Vision and Reasoning (Weeks 1 & 2 / Days 1–14):** Prathibhashree K (`feature/w3-context-schemas`, `feature/w3-context-builder-llm-adapter`)
+- **W3 — Context, Vision and Reasoning (Weeks 1, 2 & 3 / Days 1–21):** Prathibhashree K (`feature/w3-context-schemas`, `feature/w3-context-builder-llm-adapter`, `feature/w3-observations-workflow-handoff`)
 - **Target Team Branch:** `team/sde-6-voicebot`
 
 ---
@@ -200,6 +200,9 @@ python projects/sde-6-voicebot/demo/demo_grounded_response.py
 
 # Week 2 Live Context, Vision, Token Budget & LLM Adapter Demonstration
 python projects/sde-6-voicebot/demo/demo_context_reasoning_week2.py
+
+# Week 3 Live Observations, Injection Defenses & Workflow Handoff Demonstration
+python projects/sde-6-voicebot/demo/demo_observations_workflow_handoff.py
 ```
 
 ### Running the Full Test Suite:
@@ -226,3 +229,10 @@ python -m unittest discover -s projects/sde-6-voicebot/tests -v
 - **Day 10–11**: Developed `BoundedContextBuilder` with stale filtering using item TTL and timestamps, token-budget approximation, multi-factor scoring (relevance weight + recency weight), and strict budget packing.
 - **Day 12–13**: Created `LLMClientAdapter` supporting offline mock operation by default, per-request timeout enforcement, bounded retries with exponential backoff, and strict schema validation of structured outputs.
 - **Day 14**: Built security and safety guardrails detecting and rejecting malformed outputs (`MalformedOutputError`) and unsafe model responses (`UnsafeOutputError`). Developed `demo_context_reasoning_week2.py`, expanded test suite to 116 tests with 100% pass rate, and prepared Week 2 pull request into `team/sde-6-voicebot`.
+
+
+### Week 3 (Days 15–21): Workflow and Integration
+- **Day 15–16**: Implemented `Observation` and `ObservationProducer` linking every visual observation to an explicit `SourceReference` and ISO timestamp. Added perceptual/semantic duplicate frame suppression and stale frame eviction (`max_freshness_seconds`). Implemented `withdraw_consent()` which halts capture immediately and purges all retained observations and cached frames.
+- **Day 17–18**: Extended `MockReasoningEngine` to provide strictly grounded answers citing specific `SourceReference` citations for every factual claim. Engineered explicit honest 'no evidence' handling (`has_sufficient_evidence=False`, `ConfidenceLevel.UNKNOWN`) when context lacks supporting facts, preventing hallucinations.
+- **Day 19–20**: Upgraded `PromptManager` (v1.2.0) with comprehensive prompt injection detection across both user query and screen/OCR context. Built `WorkflowProposal` and `WorkflowStepProposal` contracts with risk classification and approval gates. Implemented `WorkflowHandoffClient` and `MockWorkflowReceiver` transmitting validated proposals via canonical `EventEnvelope` (`event_type="workflow.proposal_submitted"`).
+- **Day 21**: Built integration test suite (`test_week3_integration.py`) and live demo script (`demo_observations_workflow_handoff.py`). Total 82 W3 tests passing with 100% pass rate. Prepared Week 3 pull request to `team/sde-6-voicebot`.

@@ -18,6 +18,11 @@ from .reasoning import (
     ConfidenceLevel,
     ProviderStatus,
 )
+from .workflow import (
+    WorkflowProposal,
+    WorkflowStepProposal,
+    WorkflowActionRisk,
+)
 
 __all__ = [
     "EventEnvelope",
@@ -34,4 +39,7 @@ __all__ = [
     "ReasoningResult",
     "ConfidenceLevel",
     "ProviderStatus",
+    "WorkflowProposal",
+    "WorkflowStepProposal",
+    "WorkflowActionRisk",
 ]

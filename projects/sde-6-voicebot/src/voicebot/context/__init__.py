@@ -1,5 +1,5 @@
 """
-Screen Context, Vision/OCR and Bounded Context Module
+Screen Context, Vision/OCR, Bounded Context and Observations Module
 SDE 6 Voicebot — Workstream W3 (Context and Reasoning)
 Student: Prathibhashree K
 """
@@ -23,6 +23,12 @@ from .context_builder import (
     BoundedContextBuilder,
     BoundedContextResult,
 )
+from .observation_adapter import (
+    Observation,
+    ObservationProducer,
+    ConsentRevokedError,
+    StaleFrameError,
+)
 
 __all__ = [
     "ScreenCaptureAdapter",
@@ -36,4 +42,8 @@ __all__ = [
     "VisionOCRResult",
     "BoundedContextBuilder",
     "BoundedContextResult",
+    "Observation",
+    "ObservationProducer",
+    "ConsentRevokedError",
+    "StaleFrameError",
 ]
