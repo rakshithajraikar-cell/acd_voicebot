@@ -1,0 +1,49 @@
+{
+  "description": "Recorded rejection execution: Step 1 completes, Step 2 rejected by user, guarantees NO tool execution",
+  "plan": {
+    "plan_id": "fixture-rejection-002",
+    "session_id": "session-replay-rejection",
+    "correlation_id": "corr-replay-rejection",
+    "title": "Rejected Notification Plan",
+    "description": "Rejection guarantee recorded run",
+    "steps": [
+      {
+        "step_id": "step-1-format",
+        "name": "Format Discussion Points",
+        "tool_name": "format_notes",
+        "arguments": {
+          "text": "Draft notes to format."
+        },
+        "depends_on": [],
+        "is_consequential": false,
+        "is_idempotent": true,
+        "timeout_seconds": 30.0
+      },
+      {
+        "step_id": "step-2-reminder",
+        "name": "Schedule Unwanted Reminder",
+        "tool_name": "schedule_reminder",
+        "arguments": {
+          "title": "Unwanted reminder",
+          "delay_minutes": 15
+        },
+        "depends_on": ["step-1-format"],
+        "is_consequential": true,
+        "is_idempotent": false,
+        "timeout_seconds": 30.0
+      }
+    ]
+  },
+  "decisions": [
+    {
+      "request_index": 0,
+      "decision": "reject",
+      "reason": "Declined by student"
+    }
+  ],
+  "expected": {
+    "final_state": "cancelled",
+    "completed_steps": ["step-1-format"],
+    "failed_steps": ["step-2-reminder"]
+  }
+}

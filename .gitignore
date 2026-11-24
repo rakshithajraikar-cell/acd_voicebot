@@ -1,4 +1,12 @@
 *.pdf
 .pytest_cache/
 __pycache__/
-
+*.pyc
+*.log
+.env
+.env.*
+*.secret
+*.pem
+*.key
+push_to_team_repo.bat
+push_to_team_repo.ps1
