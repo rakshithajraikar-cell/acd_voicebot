@@ -3,10 +3,65 @@ SDE 6 Voicebot — Context and Reasoning Subsystem (Workstream W3)
 Student: Prathibhashree K
 """
 
-from .context.capture_adapter import ScreenCaptureAdapter, CaptureState
-from .context.synthetic_frames import SyntheticFrameGenerator, SyntheticFixture
-from .prompts.prompt_manager import PromptManager, PromptVersion, RenderedPrompt
-from .reasoning.mock_reasoner import MockReasoningEngine, ReasoningTimeoutError, ReasoningCancelledError
+from .context.capture_adapter import (
+    ScreenCaptureAdapter,
+    CaptureState,
+    CaptureRateLimitExceededError,
+    FrameSizeLimitExceededError,
+)
+from .context.synthetic_frames import (
+    SyntheticFrameGenerator,
+    SyntheticFixture,
+)
+from .context.vision_adapter import (
+    VisionAdapterInterface,
+    MockVisionOCRAdapter,
+    VisionOCRResult,
+)
+from .context.context_builder import (
+    BoundedContextBuilder,
+    BoundedContextResult,
+)
+from .context.observation_adapter import (
+    Observation,
+    ObservationProducer,
+    ConsentRevokedError,
+    StaleFrameError,
+)
+from .privacy.redactor import (
+    TextRedactor,
+)
+from .prompts.prompt_manager import (
+    PromptManager,
+    PromptVersion,
+    RenderedPrompt,
+    PromptInjectionDetectedError,
+)
+from .reasoning.mock_reasoner import (
+    MockReasoningEngine,
+    ReasoningTimeoutError,
+    ReasoningCancelledError,
+)
+from .reasoning.llm_adapter import (
+    LLMClientAdapter,
+    MockLLMBackend,
+    LLMAdapterError,
+    LLMTimeoutError,
+    LLMRetryExhaustedError,
+    MalformedOutputError,
+    UnsafeOutputError,
+)
+from .reasoning.latency import (
+    LatencyTracker,
+    LatencyReport,
+)
+from .workflow.handoff import (
+    WorkflowHandoffClient,
+    MockWorkflowReceiver,
+    WorkflowHandoffError,
+    validate_workflow_proposal,
+    ALLOW_LISTED_TOOLS,
+)
 from .validation.validators import (
     ValidationError,
     validate_reasoning_request,
@@ -18,16 +73,53 @@ from .validation.validators import (
 )
 
 __all__ = [
+    # Context & Capture
     "ScreenCaptureAdapter",
     "CaptureState",
+    "CaptureRateLimitExceededError",
+    "FrameSizeLimitExceededError",
     "SyntheticFrameGenerator",
     "SyntheticFixture",
+    # Vision & OCR
+    "VisionAdapterInterface",
+    "MockVisionOCRAdapter",
+    "VisionOCRResult",
+    # Bounded Context Builder
+    "BoundedContextBuilder",
+    "BoundedContextResult",
+    # Observations & Consent (Week 3)
+    "Observation",
+    "ObservationProducer",
+    "ConsentRevokedError",
+    "StaleFrameError",
+    # Privacy & Redaction (Week 4)
+    "TextRedactor",
+    # Prompts & Injection Defense (Week 3/4)
     "PromptManager",
     "PromptVersion",
     "RenderedPrompt",
+    "PromptInjectionDetectedError",
+    # Reasoning & LLM
     "MockReasoningEngine",
     "ReasoningTimeoutError",
     "ReasoningCancelledError",
+    "LLMClientAdapter",
+    "MockLLMBackend",
+    "LLMAdapterError",
+    "LLMTimeoutError",
+    "LLMRetryExhaustedError",
+    "MalformedOutputError",
+    "UnsafeOutputError",
+    # Latency Instrumentation (Week 4)
+    "LatencyTracker",
+    "LatencyReport",
+    # Workflow Handoff (Week 3)
+    "WorkflowHandoffClient",
+    "MockWorkflowReceiver",
+    "WorkflowHandoffError",
+    "validate_workflow_proposal",
+    "ALLOW_LISTED_TOOLS",
+    # Validation & Envelopes
     "ValidationError",
     "validate_reasoning_request",
     "validate_reasoning_result",

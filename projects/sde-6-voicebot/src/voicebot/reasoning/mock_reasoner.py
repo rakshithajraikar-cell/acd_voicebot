@@ -1,6 +1,6 @@
 """
-Deterministic Mock Reasoning Engine with Evidence Grounding
-SDE 6 Voicebot — Workstream W3 (Context and Reasoning)
+Deterministic Mock Reasoning Engine with Evidence Grounding & Workflow Proposals
+SDE 6 Voicebot — Workstream W3 (Context and Reasoning, Weeks 1-3)
 Student: Prathibhashree K
 
 Implements the standard Provider Interface:
@@ -11,7 +11,9 @@ Implements the standard Provider Interface:
 - Environment configuration with safe mock defaults
 - Deterministic output generation
 - Evidence grounding with SourceReference citations
-- Safe handling of insufficient evidence (surfacing uncertainty)
+- Safe handling of insufficient evidence (surfacing honest "no evidence" responses)
+- Defense against prompt injection in queries or screen context
+- Generation of schema-validated WorkflowProposals for downstream W4 handoff
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ from contracts.reasoning import (
     ProviderStatus,
 )
 from contracts.context import SourceReference, SourceType
+from contracts.workflow import WorkflowProposal, WorkflowStepProposal, WorkflowActionRisk
 from ..prompts.prompt_manager import PromptManager
 
 
@@ -105,14 +108,14 @@ class MockReasoningEngine:
 
         effective_timeout = timeout_ms or self.default_timeout_ms
 
-        # Render versioned prompt and check for injection attempts
+        # Render versioned prompt and check for injection attempts across both query and screen context
         rendered = PromptManager.render_prompt(
             user_query=request.user_query,
             context_items=request.context_items,
             version=request.prompt_version,
         )
 
-        # Enforce security: if injection detected, refuse immediately with policy notice
+        # Enforce security: if injection detected in user input OR screen context, refuse immediately
         if rendered.injection_detected:
             execution_time = (time.perf_counter() - start_time) * 1000.0
             return ReasoningResult(
@@ -169,9 +172,40 @@ class MockReasoningEngine:
             is_mock=True,
         )
 
+    def propose_workflow(
+        self,
+        request: ReasoningRequest,
+        goal: str,
+        steps: List[WorkflowStepProposal],
+        suggested_action: Optional[str] = None,
+    ) -> WorkflowProposal:
+        """
+        Generates a grounded, schema-validated WorkflowProposal linked to the active
+        ReasoningRequest and its supporting SourceReference citations.
+        """
+        # Grounding: gather sources from request context items
+        sources = [item.source for item in request.context_items if item.source]
+        action_name = suggested_action or (f"PROPOSE_{goal.upper().replace(' ', '_')}")
+
+        return WorkflowProposal.create(
+            session_id=request.session_id,
+            correlation_id=request.correlation_id,
+            goal=goal,
+            suggested_action=action_name,
+            steps=steps,
+            sources_used=sources,
+            confidence=0.95 if sources else 0.5,
+            metadata={
+                "request_id": request.request_id,
+                "prompt_version": request.prompt_version,
+            },
+        )
+
     def _evaluate_query_against_context(self, request: ReasoningRequest) -> ReasoningResult:
         """
         Pure deterministic pattern matcher that maps query intents to verified context evidence.
+        Produces grounded responses when evidence exists, and explicit honest 'no evidence'
+        replies when evidence is absent.
         """
         query_lower = request.user_query.lower()
         context_items = request.context_items
@@ -180,14 +214,65 @@ class MockReasoningEngine:
         combined_context = " ".join(item.content for item in context_items)
         combined_lower = combined_context.lower()
 
-        # SCENARIO A: Student Grades queries
+        # SCENARIO A: Course Schedule / Timetable queries
+        if any(w in query_lower for w in ["schedule", "timetable", "class", "lecture", "lab", "office hours", "when"]):
+            if "weekly schedule" in combined_lower or "turing hall" in combined_lower or "timetable" in combined_lower:
+                sources = [item.source for item in context_items if item.source]
+                if "cs101" in query_lower:
+                    response_text = (
+                        "Your CS101 Lecture takes place on Monday & Wednesday from 10:00 AM to 11:30 AM "
+                        "in Turing Hall Room 302, with lab on Thursday 2:00 PM - 4:00 PM in Computing Lab 4B."
+                    )
+                else:
+                    response_text = (
+                        "According to your Fall 2026 Timetable, you have CS101 Lecture on Mon/Wed 10:00-11:30 AM (Room 302) "
+                        "and MATH201 on Tue/Thu 9:00-10:30 AM (Room 105)."
+                    )
+
+                return ReasoningResult(
+                    result_id=str(uuid.uuid4()),
+                    request_id=request.request_id,
+                    session_id=request.session_id,
+                    correlation_id=request.correlation_id,
+                    response_text=response_text,
+                    sources_used=sources,
+                    confidence=0.95,
+                    confidence_level=ConfidenceLevel.HIGH,
+                    has_sufficient_evidence=True,
+                    uncertainty_reason=None,
+                    suggested_action="PROPOSE_ADD_REMINDER",
+                    prompt_version=request.prompt_version,
+                    execution_time_ms=0.0,
+                    is_mock=True,
+                )
+            else:
+                return ReasoningResult(
+                    result_id=str(uuid.uuid4()),
+                    request_id=request.request_id,
+                    session_id=request.session_id,
+                    correlation_id=request.correlation_id,
+                    response_text="I do not have sufficient evidence to view your course schedule. Please open your University Calendar.",
+                    sources_used=[],
+                    confidence=0.15,
+                    confidence_level=ConfidenceLevel.UNKNOWN,
+                    has_sufficient_evidence=False,
+                    uncertainty_reason="Insufficient evidence: No schedule details found in screen context.",
+                    suggested_action=None,
+                    prompt_version=request.prompt_version,
+                    execution_time_ms=0.0,
+                    is_mock=True,
+                )
+
+        # SCENARIO B: Student Grades queries
         if any(w in query_lower for w in ["grade", "score", "mark", "gpa", "cs101", "math201", "eng102"]):
             # Check if grades information is actually present in context
-            if "student academic portal" in combined_lower or "grade:" in combined_lower:
+            if "student academic portal" in combined_lower or "grade:" in combined_lower or "grades" in combined_lower:
                 sources = []
                 for item in context_items:
-                    if "grade:" in item.content.lower():
+                    if "grade" in item.content.lower() or "academic portal" in item.content.lower():
                         sources.append(item.source)
+                if not sources and context_items:
+                    sources = [context_items[0].source]
 
                 if "cs101" in query_lower:
                     response_text = (
@@ -248,55 +333,6 @@ class MockReasoningEngine:
                     is_mock=True,
                 )
 
-        # SCENARIO B: Course Schedule / Timetable queries
-        if any(w in query_lower for w in ["schedule", "timetable", "class", "lecture", "lab", "office hours"]):
-            if "weekly schedule" in combined_lower or "turing hall" in combined_lower:
-                sources = [item.source for item in context_items if "schedule" in item.content.lower()]
-                if "cs101" in query_lower:
-                    response_text = (
-                        "Your CS101 Lecture takes place on Monday & Wednesday from 10:00 AM to 11:30 AM "
-                        "in Turing Hall Room 302, with lab on Thursday 2:00 PM - 4:00 PM in Computing Lab 4B."
-                    )
-                else:
-                    response_text = (
-                        "According to your Fall 2026 Timetable, you have CS101 Lecture on Mon/Wed 10:00-11:30 AM (Room 302) "
-                        "and MATH201 on Tue/Thu 9:00-10:30 AM (Room 105)."
-                    )
-
-                return ReasoningResult(
-                    result_id=str(uuid.uuid4()),
-                    request_id=request.request_id,
-                    session_id=request.session_id,
-                    correlation_id=request.correlation_id,
-                    response_text=response_text,
-                    sources_used=sources,
-                    confidence=0.95,
-                    confidence_level=ConfidenceLevel.HIGH,
-                    has_sufficient_evidence=True,
-                    uncertainty_reason=None,
-                    suggested_action="PROPOSE_ADD_REMINDER",
-                    prompt_version=request.prompt_version,
-                    execution_time_ms=0.0,
-                    is_mock=True,
-                )
-            else:
-                return ReasoningResult(
-                    result_id=str(uuid.uuid4()),
-                    request_id=request.request_id,
-                    session_id=request.session_id,
-                    correlation_id=request.correlation_id,
-                    response_text="I cannot view your course schedule. Please open your University Calendar.",
-                    sources_used=[],
-                    confidence=0.15,
-                    confidence_level=ConfidenceLevel.UNKNOWN,
-                    has_sufficient_evidence=False,
-                    uncertainty_reason="Insufficient evidence: No schedule details found in screen context.",
-                    suggested_action=None,
-                    prompt_version=request.prompt_version,
-                    execution_time_ms=0.0,
-                    is_mock=True,
-                )
-
         # SCENARIO C: Library Loans queries
         if any(w in query_lower for w in ["library", "book", "loan", "borrowed", "due date"]):
             if "campus library" in combined_lower or "due date:" in combined_lower:
@@ -323,17 +359,18 @@ class MockReasoningEngine:
                 )
 
         # DEFAULT: Insufficient evidence scenario (crucial acceptance criterion)
+        # When there is no supporting evidence, response says so instead of guessing!
         return ReasoningResult(
             result_id=str(uuid.uuid4()),
             request_id=request.request_id,
             session_id=request.session_id,
             correlation_id=request.correlation_id,
             response_text=(
-                f"I do not have sufficient information in the current screen context to answer: '{request.user_query}'. "
-                "Please enable screen context or navigate to the relevant academic window."
+                f"I do not have sufficient evidence from your screen or context to answer: '{request.user_query}'. "
+                "Please navigate to the relevant academic window or open the corresponding records."
             ),
             sources_used=[],
-            confidence=0.10,
+            confidence=0.0,
             confidence_level=ConfidenceLevel.UNKNOWN,
             has_sufficient_evidence=False,
             uncertainty_reason=f"Insufficient evidence: query '{request.user_query}' has no matching records in provided context.",
