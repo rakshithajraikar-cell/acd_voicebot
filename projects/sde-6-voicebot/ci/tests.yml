@@ -1,0 +1,36 @@
+name: SDE 6 Voicebot CI
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+    branches:
+      - '**'
+
+jobs:
+  test:
+    name: Run SDE 6 Voicebot Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f projects/sde-6-voicebot/requirements.txt ]; then
+            pip install -r projects/sde-6-voicebot/requirements.txt
+          fi
+
+      - name: Run SDE 6 Tests (pytest)
+        env:
+          PYTHONPATH: projects/sde-6-voicebot:projects/sde-6-voicebot/src
+        run: |
+          pytest projects/sde-6-voicebot/tests -v
