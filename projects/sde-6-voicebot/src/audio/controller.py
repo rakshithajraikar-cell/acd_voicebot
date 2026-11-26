@@ -29,6 +29,20 @@ from src.audio.vad import EnergyVAD, VADResult
 
 
 class AudioPipelineController:
+    """Integrated Audio Pipeline Controller (SDE 6 - W1 - Weeks 2 & 3)."""
+    # Existing code ...
+    
+    def get_capture_state(self) -> str:
+        """Return a simple string representing the current capture state.
+        Values: "recording", "paused", "stopped".
+        """
+        state = self.lifecycle.state
+        if state == LifecycleState.RECORDING:
+            return "recording"
+        if state == LifecycleState.PAUSED:
+            return "paused"
+        return "stopped"
+
     """Master controller orchestrating hardware permissions, lifecycle states,
     audio ingestion, VAD classification, bounded stream buffering, event emission,
     device recovery, and transcription handoff.
