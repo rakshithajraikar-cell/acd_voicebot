@@ -7,6 +7,9 @@ Consolidated public API for:
           Voice activity detector (EnergyVAD, VADResult),
           Bounded audio buffer (BoundedAudioBuffer, BackpressurePolicy, BufferStats),
           Pipeline controller (AudioPipelineController).
+- Week 3: Speech start/end & normalized audio events (AudioEventType, AudioEventFactory, AudioEventEmitter),
+          Device-loss recovery manager (DeviceRecoveryManager),
+          Transcription bridge & STT handoff (TranscriptionBridge, SpeechSegment, MockTranscriptionReceiver).
 """
 
 from src.audio.buffer import (
@@ -20,6 +23,12 @@ from src.audio.device import (
     AudioDeviceAdapter,
     MockAudioDeviceAdapter,
     PermissionState,
+)
+from src.audio.device_recovery import DeviceRecoveryManager
+from src.audio.events import (
+    AudioEventFactory,
+    AudioEventEmitter,
+    AudioEventType,
 )
 from src.audio.lifecycle import (
     AudioLifecycleController,
@@ -35,6 +44,11 @@ from src.audio.schemas import (
     AudioFormat,
     SUPPORTED_BIT_DEPTHS,
     SUPPORTED_SAMPLE_RATES,
+)
+from src.audio.transcription_bridge import (
+    MockTranscriptionReceiver,
+    SpeechSegment,
+    TranscriptionBridge,
 )
 from src.audio.vad import (
     EnergyVAD,
@@ -70,4 +84,14 @@ __all__ = [
     "BufferStats",
     # Controller
     "AudioPipelineController",
+    # Events (Week 3)
+    "AudioEventType",
+    "AudioEventFactory",
+    "AudioEventEmitter",
+    # Device Recovery (Week 3)
+    "DeviceRecoveryManager",
+    # Transcription Bridge (Week 3)
+    "TranscriptionBridge",
+    "SpeechSegment",
+    "MockTranscriptionReceiver",
 ]
