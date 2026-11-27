@@ -6,3 +6,6 @@ export * from "./resilience/index.js";
 export * from "./orchestrator/index.js";
 export * from "./integration/index.js";
 export * from "./fixtures/transcript-fixtures.js";
+export * from "./fixtures/regression-fixtures.js";
+export * from "./logging/index.js";
+export * from "./benchmarks/index.js";

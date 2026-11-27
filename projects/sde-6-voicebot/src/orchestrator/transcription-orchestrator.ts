@@ -8,6 +8,7 @@ import type { SpeechToTextAdapter } from "../providers/stt-adapter.js";
 import { SegmentAccumulator } from "../accumulator/segment-accumulator.js";
 import { AudioPreprocessor } from "../preprocessing/audio-preprocessor.js";
 import { RetryHandler, type RetryPolicy } from "../resilience/retry-handler.js";
+import { RedactedLogger, defaultLogger } from "../logging/redacted-logger.js";
 
 export interface OrchestratorConfig {
   /**
@@ -30,6 +31,10 @@ export interface OrchestratorConfig {
    * Whether to request interim partial hypotheses from provider (default: true)
    */
   emitInterim?: boolean;
+  /**
+   * Optional redacted logger instance
+   */
+  logger?: RedactedLogger;
 }
 
 export interface OrchestrationMetrics {
@@ -55,10 +60,13 @@ export class TranscriptionOrchestrator {
   private readonly accumulator: SegmentAccumulator;
   private readonly retryHandler: RetryHandler;
   private readonly emitInterim: boolean;
+  private readonly logger: RedactedLogger;
 
-  // Track chunk deduplication
+  // Track chunk deduplication & session state
   private readonly processedChunkIds = new Set<string>();
   private readonly listeners = new Set<TranscriptEventListener>();
+  private cancelled = false;
+  private cancelledSessionId?: string;
 
   private metrics: OrchestrationMetrics = {
     totalChunksReceived: 0,
@@ -75,6 +83,7 @@ export class TranscriptionOrchestrator {
     this.accumulator = config.accumulator ?? new SegmentAccumulator();
     this.retryHandler = new RetryHandler(config.retryPolicy);
     this.emitInterim = config.emitInterim ?? true;
+    this.logger = config.logger ?? defaultLogger;
   }
 
   /**
@@ -87,9 +96,29 @@ export class TranscriptionOrchestrator {
   }> {
     this.metrics.totalChunksReceived++;
 
+    // 0. Check Cancellation Status
+    if (this.cancelled && (!this.cancelledSessionId || this.cancelledSessionId === chunk.session_id)) {
+      const cancelError: ErrorEnvelope = {
+        code: "OPERATION_CANCELLED",
+        message_safe_for_user: "Transcription was cancelled.",
+        retryable: false,
+        correlation_id: chunk.correlation_id,
+        details_redacted: { session_id: chunk.session_id, chunk_id: chunk.chunk_id },
+      };
+      this.logger.warn("Ingest rejected: transcription cancelled for session", {
+        session_id: chunk.session_id,
+        chunk_id: chunk.chunk_id,
+      });
+      return { success: false, events: [], error: cancelError };
+    }
+
     // 1. Chunk-level Duplicate Suppression
     if (this.processedChunkIds.has(chunk.chunk_id)) {
       this.metrics.duplicateChunksSuppressed++;
+      this.logger.debug("Duplicate chunk suppressed", {
+        chunk_id: chunk.chunk_id,
+        session_id: chunk.session_id,
+      });
       return { success: true, events: [] };
     }
 
@@ -110,6 +139,10 @@ export class TranscriptionOrchestrator {
           error: prepResult.error,
         },
       };
+      this.logger.error("Audio preprocessing failed", prepResult.error, {
+        chunk_id: chunk.chunk_id,
+        session_id: chunk.session_id,
+      });
       this.emitEvent(errorEvent);
       return { success: false, events: [errorEvent], error: prepResult.error };
     }
@@ -145,8 +178,27 @@ export class TranscriptionOrchestrator {
           error: executionResult.error,
         },
       };
+      this.logger.error("Transcription execution failed", executionResult.error, {
+        chunk_id: chunk.chunk_id,
+        session_id: chunk.session_id,
+      });
       this.emitEvent(errorEvent);
       return { success: false, events: [errorEvent], error: executionResult.error };
+    }
+
+    // Check cancellation once more after async execution
+    if (this.cancelled && (!this.cancelledSessionId || this.cancelledSessionId === chunk.session_id)) {
+      return {
+        success: false,
+        events: [],
+        error: {
+          code: "OPERATION_CANCELLED",
+          message_safe_for_user: "Transcription cancelled during execution.",
+          retryable: false,
+          correlation_id: chunk.correlation_id,
+          details_redacted: {},
+        },
+      };
     }
 
     const emittedEvents = executionResult.data;
@@ -159,6 +211,11 @@ export class TranscriptionOrchestrator {
 
     // Mark chunk as processed
     this.processedChunkIds.add(chunk.chunk_id);
+    this.logger.debug("Chunk processed successfully", {
+      chunk_id: chunk.chunk_id,
+      session_id: chunk.session_id,
+      eventsCount: emittedEvents.length,
+    });
 
     return { success: true, events: emittedEvents };
   }
@@ -177,9 +234,27 @@ export class TranscriptionOrchestrator {
       try {
         listener(event);
       } catch (err) {
-        console.error("Error in transcription event listener:", err);
+        this.logger.error("Error in transcription event listener", err);
       }
     }
+  }
+
+  /**
+   * Cancels in-flight and future transcriptions for the session.
+   * Ensures no further segments or events are emitted.
+   */
+  cancel(sessionId?: string): void {
+    this.cancelled = true;
+    this.cancelledSessionId = sessionId;
+    this.adapter.cancel();
+    this.logger.info("Transcription cancelled", { session_id: sessionId });
+  }
+
+  /**
+   * Returns whether orchestrator is in cancelled state
+   */
+  isCancelled(): boolean {
+    return this.cancelled;
   }
 
   /**
@@ -214,6 +289,8 @@ export class TranscriptionOrchestrator {
    * Resets orchestrator state for a clean session
    */
   reset(): void {
+    this.cancelled = false;
+    this.cancelledSessionId = undefined;
     this.processedChunkIds.clear();
     this.accumulator.clear();
     this.adapter.reset();
@@ -227,4 +304,3 @@ export class TranscriptionOrchestrator {
     };
   }
 }
-

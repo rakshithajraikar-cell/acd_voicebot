@@ -16,6 +16,64 @@ export function generateSyntheticAudioBytes(durationMs: number, sampleRate: numb
   return bytes;
 }
 
+export interface SyntheticChunkOptions {
+  chunkId?: string;
+  sequenceNumber?: number;
+  sampleRate?: number;
+  startTimeMs?: number;
+  durationMs?: number;
+  sessionId?: string;
+  correlationId?: string;
+  testPhraseToken?: string;
+  data?: string | Uint8Array;
+  isSpeech?: boolean;
+}
+
+/**
+ * Helper factory to create fully schema-compliant AudioChunkInput fixtures.
+ */
+export function createSyntheticChunk(options: SyntheticChunkOptions = {}): AudioChunkInput {
+  const seq = options.sequenceNumber ?? 0;
+  const startTime = options.startTimeMs ?? seq * 100;
+  const duration = options.durationMs ?? 100;
+  const sampleRate = options.sampleRate ?? 16000;
+  const sessionId = options.sessionId ?? "default-session";
+  const chunkId = options.chunkId ?? `chunk-${seq}`;
+  const correlationId = options.correlationId ?? `corr-${chunkId}`;
+  const isSpeech = options.isSpeech ?? true;
+  const data = options.data ?? (options.testPhraseToken ?? generateSyntheticAudioBytes(duration, sampleRate));
+
+  return {
+    chunk_id: chunkId,
+    sequence_number: seq,
+    session_id: sessionId,
+    correlation_id: correlationId,
+    timestamp_ms: startTime,
+    duration_ms: duration,
+    sample_rate: sampleRate,
+    channels: 1,
+    data,
+    is_speech: isSpeech,
+  };
+}
+
+/**
+ * Helper generating multi-rate audio fixtures for testing resampling.
+ */
+export function createMultiRateChunks(
+  rates: number[] = [8000, 16000, 44100, 48000],
+  sessionId = "multi-rate-session"
+): AudioChunkInput[] {
+  return rates.map((rate, i) =>
+    createSyntheticChunk({
+      sequenceNumber: i,
+      sampleRate: rate,
+      sessionId,
+      testPhraseToken: `multi_rate_${rate}hz`,
+    })
+  );
+}
+
 /**
  * Standard synthetic audio chunks representing a live 3-stage user utterance:
  * Utterance: "Academic voicebot system ready. Start session now."

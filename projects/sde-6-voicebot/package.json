@@ -8,9 +8,11 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
+    "benchmark": "tsx src/benchmarks/transcription-benchmark.ts",
     "demo": "tsx src/demo/chunk-to-transcript.ts",
     "demo:week2": "tsx src/demo/week2-orchestrator-demo.ts",
-    "demo:week3": "tsx src/demo/week3-integration-demo.ts"
+    "demo:week3": "tsx src/demo/week3-integration-demo.ts",
+    "demo:final": "tsx src/demo/week4-final-demo.ts"
   },
   "dependencies": {
     "zod": "^3.24.2"
